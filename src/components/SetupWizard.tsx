@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import FolderPicker from './FolderPicker';
-import { Logo } from './Logo';
+import { LogoMark } from './Logo';
 
 /**
  * First-run wizard: shown only when the install has no profiles yet.
@@ -10,6 +10,8 @@ import { Logo } from './Logo';
  */
 
 const STEPS = ['Welcome', 'Profile', 'Music', 'Lidarr', 'Spotify', 'Done'] as const;
+// the middle four are the real numbered sequence; welcome/done bookend it
+const EYEBROWS: Record<number, string> = { 1: 'Profile', 2: 'Music', 3: 'Lidarr · optional', 4: 'Spotify · optional' };
 
 export default function SetupWizard({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0);
@@ -128,6 +130,15 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-base p-4">
+      {/* vinyl grooves — the logo's ring motif, pressed into the backdrop */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'repeating-radial-gradient(circle at 50% 42%, transparent 0px, transparent 42px, rgba(255,255,255,0.025) 42px, rgba(255,255,255,0.025) 44px)',
+        }}
+      />
       {pickerOpen && (
         <FolderPicker
           onClose={() => setPickerOpen(false)}
@@ -138,27 +149,37 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
         />
       )}
 
-      <div className="w-full max-w-lg">
-        {/* step dots */}
+      <div className="relative w-full max-w-lg">
+        {/* step dots: done · current · upcoming */}
         <div className="mb-6 flex items-center justify-center gap-2" aria-hidden>
           {STEPS.map((s, i) => (
             <span
               key={s}
-              className={`h-1.5 rounded-full transition-all ${i === step ? 'w-6 bg-accent' : 'w-1.5 bg-border'}`}
+              className={`h-1.5 rounded-full transition-all ${
+                i === step ? 'w-6 bg-accent' : i < step ? 'w-1.5 bg-white/40' : 'w-1.5 bg-border'
+              }`}
             />
           ))}
         </div>
 
-        <div className="rounded-lg bg-elevated p-6 shadow-dialog sm:p-8">
+        <div key={step} className="step-enter rounded-lg bg-elevated p-6 shadow-dialog sm:p-8">
+          {step >= 1 && step <= 4 && (
+            <div className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-subdued">
+              Step {step} of 4 — {EYEBROWS[step]}
+            </div>
+          )}
+
           {step === 0 && (
-            <div className="flex flex-col items-center gap-4 text-center">
-              <Logo />
-              <h1 className="text-2xl font-extrabold">Welcome to Spotless</h1>
-              <p className="text-sm text-subdued">
-                Your own music, streamed from your own server. This takes about a minute — and
+            <div className="flex flex-col items-center gap-5 py-2 text-center">
+              <LogoMark size={72} hole="#181818" />
+              <h1 className="font-display text-4xl font-extrabold leading-none tracking-tight">
+                Spotless<span className="text-accent">.</span>
+              </h1>
+              <p className="max-w-sm text-sm text-subdued">
+                Your music, on your server, for the whole household. Setup takes about a minute —
                 everything here can be changed later in Settings.
               </p>
-              <button onClick={() => setStep(1)} className="btn-primary mt-2">
+              <button onClick={() => setStep(1)} className="btn-primary mt-1">
                 Get started
               </button>
             </div>
@@ -222,7 +243,9 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
               </div>
               {scanning && <div className="text-sm text-subdued">Reading tags — bigger libraries take a few minutes…</div>}
               {trackCount !== null && !scanning && (
-                <div className="text-sm font-medium text-accent">✓ Found {trackCount} tracks</div>
+                <div className="step-enter text-base font-bold text-accent">
+                  ✓ Found {trackCount.toLocaleString()} tracks
+                </div>
               )}
               <div className="flex justify-between pt-2">
                 <SkipButton to={3} />
@@ -235,7 +258,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
 
           {step === 3 && (
             <div className="space-y-4">
-              <h2 className="text-xl font-bold">Connect Lidarr (optional)</h2>
+              <h2 className="text-xl font-bold">Connect Lidarr</h2>
               <p className="text-sm text-subdued">
                 With Lidarr connected, Discover and Search grow download buttons — and family
                 profiles can request music for the admin to approve. API key: Lidarr → Settings →
@@ -271,7 +294,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
 
           {step === 4 && (
             <div className="space-y-4">
-              <h2 className="text-xl font-bold">Connect Spotify (optional)</h2>
+              <h2 className="text-xl font-bold">Connect Spotify</h2>
               {spotifyConfigured === null && <p className="text-sm text-subdued">Checking…</p>}
               {spotifyConfigured === false && (
                 <p className="text-sm text-subdued">

@@ -12,11 +12,26 @@ body {
 
 /* Spotify-style pill buttons: uppercase label voice with wide tracking */
 @layer components {
+  /* setup wizard: step content rises in on change */
+  .step-enter {
+    animation: step-rise 0.28s ease both;
+  }
   .btn-pill {
     @apply rounded-full border border-border px-4 py-1.5 text-sm font-bold uppercase tracking-[0.1em] text-subdued transition-colors hover:border-white hover:text-white disabled:opacity-50;
   }
   .btn-primary {
     @apply rounded-full bg-accent px-6 py-2 text-sm font-bold uppercase tracking-[0.1em] text-black transition-transform hover:scale-[1.04] hover:bg-accentBright disabled:opacity-50;
+  }
+}
+
+@keyframes step-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 

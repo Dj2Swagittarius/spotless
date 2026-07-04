@@ -82,6 +82,8 @@ Point it at a folder of music and it gives your household a fast dark-themed pla
    (the first one becomes the admin), scanning your library, and the optional Lidarr and
    Spotify hookups. Every step is skippable and lives in Settings afterwards.
 
+   ![Setup wizard](docs/setup.png)
+
 ## Configuration
 
 | Env var             | Default  | Purpose                                              |
