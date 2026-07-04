@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+  background: #000;
+  color: #fff;
+  font-family: var(--font-app), 'Helvetica Neue', helvetica, arial, sans-serif;
+}
+
+/* Spotify-style pill buttons: uppercase label voice with wide tracking */
+@layer components {
+  .btn-pill {
+    @apply rounded-full border border-border px-4 py-1.5 text-sm font-bold uppercase tracking-[0.1em] text-subdued transition-colors hover:border-white hover:text-white disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply rounded-full bg-accent px-6 py-2 text-sm font-bold uppercase tracking-[0.1em] text-black transition-transform hover:scale-[1.04] hover:bg-accentBright disabled:opacity-50;
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4d4d4d transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #4d4d4d;
+  border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* keyboard focus: visible ring, only for keyboard (not mouse clicks) */
+:focus-visible {
+  outline: 2px solid #1db954;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* faster taps + no accidental double-tap zoom on controls */
+button,
+a,
+input,
+summary {
+  touch-action: manipulation;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, #fff var(--fill, 0%), #4d4d4d var(--fill, 0%));
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0;
+}
+input[type='range']:hover::-webkit-slider-thumb {
+  opacity: 1;
+}
+input[type='range']:hover {
+  background: linear-gradient(to right, #1db954 var(--fill, 0%), #4d4d4d var(--fill, 0%));
+}

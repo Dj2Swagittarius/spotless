@@ -1,0 +1,15 @@
+services:
+  spotless:
+    build: .
+    container_name: spotless
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # environment:
+    #   # optional — enables the Spotify taste/playlist import (see README)
+    #   - SPOTIFY_CLIENT_ID=your_spotify_app_client_id
+    volumes:
+      # left side: your music folder on the host (read-only; never modified)
+      - /path/to/your/music:/music:ro
+      # persistent app data (database, extracted album art, backups)
+      - ./data:/data
