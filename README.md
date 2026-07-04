@@ -78,8 +78,9 @@ Point it at a folder of music and it gives your household a fast dark-themed pla
    docker compose up -d --build
    ```
 
-3. Open `http://<server-ip>:3000`, create your profile (the first profile becomes the admin),
-   and the library scans automatically. Rescan any time from Settings.
+3. Open `http://<server-ip>:3000` — a setup wizard walks you through creating your profile
+   (the first one becomes the admin), scanning your library, and the optional Lidarr and
+   Spotify hookups. Every step is skippable and lives in Settings afterwards.
 
 ## Configuration
 

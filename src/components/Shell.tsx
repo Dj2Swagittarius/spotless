@@ -6,20 +6,30 @@ import Player from './Player';
 import MobileNav from './MobileNav';
 import TopBar from './TopBar';
 import ProfilePicker from './ProfilePicker';
+import SetupWizard from './SetupWizard';
 import { useLikes } from '@/store/likes';
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const loadLikes = useLikes((s) => s.load);
   const [needsProfile, setNeedsProfile] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
   useEffect(() => {
     loadLikes();
     fetch('/api/users')
       .then((r) => r.json())
-      .then((d) => {
-        if (!d.current) setNeedsProfile(true);
+      .then(async (d) => {
+        if (d.current) return;
+        // fresh install (no profiles at all) gets the wizard; otherwise just pick a profile
+        const setup = await fetch('/api/setup').then((r) => r.json()).catch(() => null);
+        if (setup && !setup.complete && setup.userCount === 0) setNeedsSetup(true);
+        else setNeedsProfile(true);
       })
       .catch(() => {});
   }, [loadLikes]);
+
+  if (needsSetup) {
+    return <SetupWizard onDone={() => location.reload()} />;
+  }
 
   if (needsProfile) {
     return (

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { spotifyStatus, importTaste, disconnect } from '@/lib/spotify';
+import { spotifyStatus, importTaste, disconnect, hasSpotifyClient } from '@/lib/spotify';
 import { userIdFrom } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  return NextResponse.json(spotifyStatus(userIdFrom(req)));
+  return NextResponse.json({ ...spotifyStatus(userIdFrom(req)), clientConfigured: hasSpotifyClient });
 }
 
 // re-import taste data using stored tokens
