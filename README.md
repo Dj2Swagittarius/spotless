@@ -4,6 +4,22 @@ Self-hosted, single-container music streamer for your own files, with a Spotify-
 
 Point it at a folder of music and it gives your household a fast dark-themed player with profiles, discovery, and optional Lidarr/Spotify integrations.
 
+![Home](docs/home.png)
+
+| Discover — suggestions, new releases, collection gaps | Artist pages |
+| --- | --- |
+| ![Discover](docs/discover.png) | ![Artist](docs/artist.png) |
+
+| Trending charts | Listening stats |
+| --- | --- |
+| ![Trending](docs/trending.png) | ![Stats](docs/stats.png) |
+
+<p align="center">
+  <img src="docs/mobile-home.png" width="32%" alt="Mobile home" />
+  &nbsp;
+  <img src="docs/mobile-nowplaying.png" width="32%" alt="Mobile now playing" />
+</p>
+
 ## Features
 
 **Player**
