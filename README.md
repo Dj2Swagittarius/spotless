@@ -14,6 +14,10 @@ Point it at a folder of music and it gives your household a fast dark-themed pla
 | --- | --- |
 | ![Trending](docs/trending.png) | ![Stats](docs/stats.png) |
 
+Per-device streaming quality — original files, or transcode to MP3 on the fly to save data:
+
+![Streaming quality](docs/settings-playback.png)
+
 <p align="center">
   <img src="docs/mobile-home.png" width="32%" alt="Mobile home" />
   &nbsp;
