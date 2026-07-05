@@ -264,34 +264,45 @@ export default function DiscoverPage() {
                 <div className="mb-2 text-xs text-subdued">
                   {r.releaseDate} · {r.recordType.toUpperCase()}
                 </div>
-                {lidarrConfigured && (
-                  dlState[`${r.artist}|${r.title}`] ? (
-                    <span className="text-xs font-medium text-accent">
-                      {dlState[`${r.artist}|${r.title}`] === 'busy'
-                        ? 'Sending…'
-                        : dlState[`${r.artist}|${r.title}`] === 'requested'
-                          ? '✓ Requested'
-                          : '✓ Sent to Lidarr'}
-                    </span>
-                  ) : (
-                    <button
-                      onClick={async () => {
-                        const key = `${r.artist}|${r.title}`;
-                        setDlState((s) => ({ ...s, [key]: 'busy' }));
-                        const res = await fetch('/api/lidarr/add', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ artist: r.artist, album: r.title }),
-                        });
-                        const d = await res.json().catch(() => ({}));
-                        setDlState((s) => ({ ...s, [key]: res.ok ? (d.status === 'requested' ? 'requested' : 'sent') : 'busy' }));
-                      }}
-                      className="rounded-full border border-border px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-subdued hover:border-white hover:text-white"
-                    >
-                      {isAdmin ? '⤓ Get via Lidarr' : '⤓ Request'}
-                    </button>
-                  )
-                )}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => togglePreview(`rel|${r.artist}|${r.title}`, r.artist, r.title)}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 hover:bg-accent hover:text-black md:h-8 md:w-8"
+                    title="30-second preview"
+                    aria-label="30-second preview"
+                  >
+                    {playingUrl === `rel|${r.artist}|${r.title}` ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
+                  </button>
+                  {lidarrConfigured && (
+                    dlState[`${r.artist}|${r.title}`] ? (
+                      <span className="text-xs font-medium text-accent">
+                        {dlState[`${r.artist}|${r.title}`] === 'busy'
+                          ? 'Sending…'
+                          : dlState[`${r.artist}|${r.title}`] === 'requested'
+                            ? '✓ Requested'
+                            : '✓ Sent'}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          const key = `${r.artist}|${r.title}`;
+                          setDlState((s) => ({ ...s, [key]: 'busy' }));
+                          const res = await fetch('/api/lidarr/add', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ artist: r.artist, album: r.title }),
+                          });
+                          const d = await res.json().catch(() => ({}));
+                          setDlState((s) => ({ ...s, [key]: res.ok ? (d.status === 'requested' ? 'requested' : 'sent') : 'busy' }));
+                        }}
+                        className="rounded-full border border-border px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-subdued hover:border-white hover:text-white"
+                        title={isAdmin ? 'Get via Lidarr' : 'Request download'}
+                      >
+                        {isAdmin ? '⤓ Lidarr' : '⤓ Request'}
+                      </button>
+                    )
+                  )}
+                </div>
               </div>
             ))}
           </div>
