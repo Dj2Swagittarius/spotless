@@ -67,7 +67,12 @@ export default function DiscoverPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [requests, setRequests] = useState<DownloadRequest[]>([]);
   const [reqErr, setReqErr] = useState<Record<number, string>>({});
+  // locally-dismissed download rows (keyed by artist|title) — Lidarr keeps failed items forever
+  const [dlDismissed, setDlDismissed] = useState<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const dlKey = (d: { artist: string | null; title: string }) => `${d.artist ?? ''}|${d.title}`;
+  const visibleDl = dlQueue.filter((d) => !dlDismissed.has(dlKey(d)));
 
   const loadRequests = () =>
     fetch('/api/requests').then((r) => r.json()).then((d) => setRequests(d.requests ?? [])).catch(() => {});
@@ -100,9 +105,21 @@ export default function DiscoverPage() {
     loadRequests();
     fetch('/api/releases').then((r) => r.json()).then((d) => setReleases(d.releases ?? [])).catch(() => setReleases([]));
     const pollQueue = () =>
-      fetch('/api/lidarr/queue').then((r) => r.json()).then((d) => setDlQueue(d.items ?? [])).catch(() => {});
+      fetch('/api/lidarr/queue')
+        .then((r) => r.json())
+        .then((d) => {
+          const items = (d.items ?? []) as typeof dlQueue;
+          setDlQueue(items);
+          // drop dismissals for rows no longer in the queue, so a re-download shows again
+          const live = new Set(items.map(dlKey));
+          setDlDismissed((s) => {
+            const next = new Set([...s].filter((k) => live.has(k)));
+            return next.size === s.size ? s : next;
+          });
+        })
+        .catch(() => {});
     pollQueue();
-    const qi = setInterval(pollQueue, 15000);
+    const qi = setInterval(pollQueue, 5000);
     const err = new URLSearchParams(location.search).get('spotify_error');
     if (err) setSpotifyError(err);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -223,17 +240,34 @@ export default function DiscoverPage() {
         </section>
       )}
 
-      {dlQueue.length > 0 && (
+      {visibleDl.length > 0 && (
         <section className="rounded-lg bg-elevated p-4">
-          <h2 className="mb-2 font-bold">Downloads</h2>
+          <div className="mb-2 flex items-center gap-3">
+            <h2 className="font-bold">Downloads</h2>
+            <div className="flex-1" />
+            <button
+              onClick={() => setDlDismissed(new Set(dlQueue.map(dlKey)))}
+              className="text-xs text-subdued hover:text-white"
+            >
+              Clear all
+            </button>
+          </div>
           <div className="space-y-2">
-            {dlQueue.map((d, i) => (
-              <div key={i}>
-                <div className="mb-0.5 flex items-baseline justify-between gap-3 text-sm">
+            {visibleDl.map((d) => (
+              <div key={dlKey(d)}>
+                <div className="mb-0.5 flex items-baseline justify-between gap-2 text-sm">
                   <span className="min-w-0 truncate">{d.artist ? `${d.artist} — ` : ''}{d.title}</span>
                   <span className="shrink-0 text-xs text-subdued">
                     {d.state === 'importFailed' ? 'import failed' : d.status === 'completed' ? 'importing…' : `${d.pct}%`}
                   </span>
+                  <button
+                    onClick={() => setDlDismissed((s) => new Set(s).add(dlKey(d)))}
+                    title="Dismiss"
+                    aria-label={`Dismiss ${d.title}`}
+                    className="shrink-0 rounded-full p-1 text-subdued hover:bg-highlight hover:text-white"
+                  >
+                    <XIcon size={12} />
+                  </button>
                 </div>
                 <div className="h-1 rounded bg-highlight">
                   <div
