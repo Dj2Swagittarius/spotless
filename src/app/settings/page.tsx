@@ -58,6 +58,10 @@ export default function SettingsPage() {
   // profile
   const [me, setMe] = useState<{ id: number; name: string; color: string; isAdmin?: boolean } | null>(null);
 
+  // mobile apps (Subsonic credential)
+  const [appCred, setAppCred] = useState<{ username: string; password: string } | null>(null);
+  const [credVisible, setCredVisible] = useState(false);
+
   // duplicates
   const [dupes, setDupes] = useState<{ artist: string; title: string; keep: string; remove: string[] }[] | null>(null);
   const [dupesLoading, setDupesLoading] = useState(false);
@@ -83,6 +87,7 @@ export default function SettingsPage() {
       .catch(() => {});
     fetch('/api/discover/dislike').then((r) => r.json()).then(setDislikes).catch(() => {});
     fetch('/api/users').then((r) => r.json()).then((d) => setMe(d.current)).catch(() => {});
+    fetch('/api/users/app-password').then((r) => r.json()).then((d) => d.username && setAppCred(d)).catch(() => {});
     loadScan();
     loadArt();
     try {
@@ -241,6 +246,52 @@ export default function SettingsPage() {
             Switch profile
           </button>
         </div>
+      </Section>
+
+      <Section title="Mobile apps">
+        <p className="mb-3 text-sm text-subdued">
+          Spotless speaks the Subsonic API, so native mobile apps like{' '}
+          <span className="text-white">Symfonium</span>, <span className="text-white">DSub</span> or{' '}
+          <span className="text-white">play:Sub</span> can stream, transcode and download your library
+          for offline listening. Add a server in the app with these details:
+        </p>
+        {appCred ? (
+          <div className="space-y-2 text-sm">
+            <div className="rounded bg-highlight px-3 py-2">
+              <span className="text-subdued">Server: </span>
+              <span className="break-all">{typeof location !== 'undefined' ? location.origin : ''}</span>
+            </div>
+            <div className="rounded bg-highlight px-3 py-2">
+              <span className="text-subdued">Username: </span>
+              {appCred.username}
+            </div>
+            <div className="flex items-center gap-2 rounded bg-highlight px-3 py-2">
+              <span className="text-subdued">Password: </span>
+              <span className="font-mono">{credVisible ? appCred.password : '••••••••••••'}</span>
+              <button
+                onClick={() => setCredVisible((v) => !v)}
+                className="ml-auto text-xs font-bold uppercase tracking-[0.08em] text-subdued hover:text-white"
+              >
+                {credVisible ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                className={btn}
+                onClick={async () => {
+                  const d = await fetch('/api/users/app-password', { method: 'POST' }).then((r) => r.json());
+                  setAppCred(d);
+                  setCredVisible(true);
+                }}
+              >
+                New password
+              </button>
+              <span className="text-xs text-subdued">Regenerating logs out apps using the old one.</span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-subdued">Loading…</div>
+        )}
       </Section>
 
       {me && !me.isAdmin && (

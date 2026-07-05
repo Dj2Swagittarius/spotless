@@ -12,6 +12,9 @@ RUN npm run build
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 
+# ffmpeg powers on-the-fly transcoding for Subsonic mobile clients
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 ENV MUSIC_DIR=/music
 ENV DATA_DIR=/data

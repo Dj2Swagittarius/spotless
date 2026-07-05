@@ -79,6 +79,8 @@ export function getDb(): Database.Database {
   `);
   migrateMultiUser(db);
   if (!hasColumn(db, 'tracks', 'gain')) db.exec('ALTER TABLE tracks ADD COLUMN gain REAL');
+  // per-profile credential for Subsonic mobile clients (generated on demand)
+  if (!hasColumn(db, 'users', 'app_password')) db.exec('ALTER TABLE users ADD COLUMN app_password TEXT');
   db.exec(`
     CREATE TABLE IF NOT EXISTS collections (
       user_id INTEGER NOT NULL,

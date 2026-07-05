@@ -53,6 +53,15 @@ Point it at a folder of music and it gives your household a fast dark-themed pla
 - "Complete your collection": studio albums you're missing, repackage/remix noise filtered out
 - Trending: country charts with region picker, genre rows, "trending for you" genre blend
 
+**Mobile apps (Subsonic API)**
+- Spotless implements the Subsonic API, so mature native apps work out of the box:
+  **Symfonium**, **DSub**, **Substreamer**, **play:Sub** and friends — with the offline
+  download/sync those apps provide
+- On-the-fly **transcoding** via ffmpeg (mp3/ogg/opus/aac, client-requested bitrate) for
+  streaming big FLAC libraries over mobile data
+- Each profile gets its own generated app password (Settings → Mobile apps); stars,
+  scrobbles and playlists from the app land on the right profile
+
 **Integrations** (optional)
 - **Lidarr**: one-click add + search for a whole artist or one specific album; live download
   queue widget; webhook triggers a library rescan when imports finish.
@@ -92,10 +101,18 @@ Point it at a folder of music and it gives your household a fast dark-themed pla
 | `DATA_DIR`          | `/data`  | SQLite DB, extracted album art, nightly backups      |
 | `PORT`              | `3000`   | HTTP port                                            |
 | `SPOTIFY_CLIENT_ID` | _(none)_ | Optional; enables the Spotify taste/playlist import  |
+| `FFMPEG_PATH`       | `ffmpeg` | Path to ffmpeg (bundled in the Docker image)         |
 
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
 Webhook pointing at `http://<spotless-host>:3000/api/lidarr/webhook`.
+
+### Connecting a mobile app
+
+Open **Settings → Mobile apps** on the profile you want to use — it shows the server URL,
+username and a generated app password. Add those as a Subsonic server in Symfonium, DSub,
+Substreamer, play:Sub or any other Subsonic-compatible client. Downloads/offline mode and
+bitrate/transcoding options are handled by the app.
 
 ### Spotify setup (optional)
 
