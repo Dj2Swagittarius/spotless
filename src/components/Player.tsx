@@ -34,6 +34,17 @@ function crossfadeSec(): number {
   }
 }
 
+// stream quality: 'raw' (original file) or a target bitrate the server transcodes to
+const QUALITY_BITRATE: Record<string, number> = { high: 320, normal: 192, saver: 128 };
+function qualityQuery(): string {
+  try {
+    const br = QUALITY_BITRATE[localStorage.getItem('streamQuality') ?? 'raw'];
+    return br ? `?format=mp3&maxBitRate=${br}` : '';
+  } catch {
+    return '';
+  }
+}
+
 export default function Player() {
   const audioARef = useRef<HTMLAudioElement>(null);
   const audioBRef = useRef<HTMLAudioElement>(null);
@@ -61,8 +72,11 @@ export default function Player() {
   const nextTrack = nextIndex >= 0 ? queue[nextIndex] : null;
 
   const els = () => [audioARef.current, audioBRef.current] as const;
-  const streamPath = (id: number) => `/api/stream/${id}`;
-  const hasSrc = (a: HTMLAudioElement | null, id: number) => !!a && a.src.includes(streamPath(id));
+  const streamPath = (id: number) => `/api/stream/${id}${qualityQuery()}`;
+  // match on the base path (ignoring the quality query) so changing quality mid-session
+  // doesn't force-reload the current track; anchor to avoid 12 matching 123
+  const hasSrc = (a: HTMLAudioElement | null, id: number) =>
+    !!a && (a.src.includes(`/api/stream/${id}?`) || a.src.endsWith(`/api/stream/${id}`));
 
   // navigating anywhere closes the full-screen player and popups
   useEffect(() => {

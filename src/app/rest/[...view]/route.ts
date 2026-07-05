@@ -1,10 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
-import { Readable } from 'stream';
 import { NextRequest } from 'next/server';
 import { getDb, artDir } from '@/lib/db';
 import { scanLibrary, scanStatus } from '@/lib/scanner';
+import { serveTrack } from '@/lib/streaming';
 import { ADMIN_USER_ID } from '@/lib/user';
 import {
   authenticate,
@@ -28,7 +27,6 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const IGNORED_ARTICLES = 'The El La Los Las Le Les';
 
 type Ctx = { req: NextRequest; user: SubUser; q: URLSearchParams };
@@ -105,76 +103,15 @@ function like(term: string): string {
 
 // ---------- media endpoints (non-envelope responses) ----------
 
-function rawFile(req: NextRequest, filePath: string, mime: string): Response {
-  const size = fs.statSync(filePath).size;
-  const range = req.headers.get('range');
-  if (range) {
-    const m = range.match(/bytes=(\d*)-(\d*)/);
-    let start = m && m[1] ? parseInt(m[1], 10) : 0;
-    let end = m && m[2] ? parseInt(m[2], 10) : size - 1;
-    if (isNaN(start) || start >= size) start = 0;
-    if (isNaN(end) || end >= size) end = size - 1;
-    const stream = fs.createReadStream(filePath, { start, end });
-    return new Response(Readable.toWeb(stream) as ReadableStream, {
-      status: 206,
-      headers: {
-        'Content-Type': mime,
-        'Content-Length': String(end - start + 1),
-        'Content-Range': `bytes ${start}-${end}/${size}`,
-        'Accept-Ranges': 'bytes',
-      },
-    });
-  }
-  const stream = fs.createReadStream(filePath);
-  return new Response(Readable.toWeb(stream) as ReadableStream, {
-    headers: { 'Content-Type': mime, 'Content-Length': String(size), 'Accept-Ranges': 'bytes' },
-  });
-}
-
-const RAW_MIME: Record<string, string> = {
-  '.mp3': 'audio/mpeg',
-  '.flac': 'audio/flac',
-  '.m4a': 'audio/mp4',
-  '.aac': 'audio/aac',
-  '.ogg': 'audio/ogg',
-  '.opus': 'audio/ogg',
-  '.wav': 'audio/wav',
-};
-
 async function streamTrack(ctx: Ctx, download = false): Promise<Response> {
   const sid = parseSid(ctx.q.get('id'));
   if (!sid || sid.kind !== 'track') return subsonicError(ctx.req, 70, 'song not found');
   const row = db().prepare('SELECT path FROM tracks WHERE id = ?').get(sid.id) as { path: string } | undefined;
   if (!row || !fs.existsSync(row.path)) return subsonicError(ctx.req, 70, 'song not found');
-
-  const suffix = path.extname(row.path).toLowerCase();
-  const raw = () => rawFile(ctx.req, row.path, RAW_MIME[suffix] ?? 'application/octet-stream');
-  const format = (ctx.q.get('format') ?? '').toLowerCase();
-  const maxBitRate = Number(ctx.q.get('maxBitRate')) || 0;
-  const wantsRaw =
-    download || format === 'raw' || (maxBitRate === 0 && (!format || format === suffix.slice(1)));
-  if (wantsRaw) return raw();
-
-  // transcode via ffmpeg; falls back to the raw file if ffmpeg isn't available
-  const fmt = ['mp3', 'ogg', 'opus', 'aac'].includes(format) ? format : 'mp3';
-  const br = Math.min(Math.max(maxBitRate || 192, 32), 320);
-  const args = ['-v', 'error', '-i', row.path, '-map', '0:a:0', '-vn'];
-  if (fmt === 'mp3') args.push('-c:a', 'libmp3lame', '-b:a', `${br}k`, '-f', 'mp3');
-  else if (fmt === 'opus') args.push('-c:a', 'libopus', '-b:a', `${br}k`, '-f', 'ogg');
-  else if (fmt === 'ogg') args.push('-c:a', 'libvorbis', '-b:a', `${br}k`, '-f', 'ogg');
-  else args.push('-c:a', 'aac', '-b:a', `${br}k`, '-f', 'adts');
-  args.push('pipe:1');
-
-  const proc = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'ignore'] });
-  const spawned = await new Promise<boolean>((resolve) => {
-    proc.once('error', () => resolve(false));
-    proc.once('spawn', () => resolve(true));
-  });
-  if (!spawned) return raw();
-  ctx.req.signal.addEventListener('abort', () => proc.kill('SIGKILL'));
-  const mime = fmt === 'mp3' ? 'audio/mpeg' : fmt === 'aac' ? 'audio/aac' : 'audio/ogg';
-  return new Response(Readable.toWeb(proc.stdout) as ReadableStream, {
-    headers: { 'Content-Type': mime, 'Cache-Control': 'no-store' },
+  return serveTrack(ctx.req, row.path, {
+    format: ctx.q.get('format'),
+    maxBitRate: Number(ctx.q.get('maxBitRate')) || 0,
+    download,
   });
 }
 

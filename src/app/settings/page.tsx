@@ -52,6 +52,7 @@ export default function SettingsPage() {
 
   // playback
   const [crossfade, setCrossfade] = useState(0);
+  const [quality, setQuality] = useState('raw');
   const radio = usePlayer((s) => s.radio);
   const toggleRadio = usePlayer((s) => s.toggleRadio);
 
@@ -92,6 +93,7 @@ export default function SettingsPage() {
     loadArt();
     try {
       setCrossfade(Number(localStorage.getItem('crossfade') ?? 0) || 0);
+      setQuality(localStorage.getItem('streamQuality') ?? 'raw');
     } catch {
       // ignore
     }
@@ -102,6 +104,15 @@ export default function SettingsPage() {
     setCrossfade(v);
     try {
       localStorage.setItem('crossfade', String(v));
+    } catch {
+      // ignore
+    }
+  };
+
+  const saveQuality = (v: string) => {
+    setQuality(v);
+    try {
+      localStorage.setItem('streamQuality', v);
     } catch {
       // ignore
     }
@@ -320,6 +331,31 @@ export default function SettingsPage() {
       )}
 
       <Section title="Playback">
+        <label className="mb-2 block text-sm font-medium">Streaming quality</label>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: 'raw', label: 'Original' },
+            { id: 'high', label: 'High · 320' },
+            { id: 'normal', label: 'Normal · 192' },
+            { id: 'saver', label: 'Data saver · 128' },
+          ].map((o) => (
+            <button
+              key={o.id}
+              onClick={() => saveQuality(o.id)}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                quality === o.id ? 'bg-white text-black' : 'bg-highlight text-white hover:bg-press'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <p className="mb-5 mt-2 text-sm text-subdued">
+          Original streams your files untouched — best quality, no server work. The lower tiers
+          transcode to MP3 on the fly to save data and storage; the difference is subtle at 192kbps
+          and up. Applies to this device.
+        </p>
+
         <label className="mb-1 block text-sm font-medium">
           Crossfade: {crossfade === 0 ? 'off (gapless)' : `${crossfade}s`}
         </label>
