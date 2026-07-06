@@ -40,6 +40,14 @@ export function regenerateAppPassword(userId: number): string {
   return pw;
 }
 
+/** Constant-time string compare; false on length mismatch (avoids leaking length via throw). */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 /** Resolve the acting user from Subsonic auth params (u + t/s token, or u + p password). */
 export function authenticate(req: NextRequest): SubUser | null {
   const q = req.nextUrl.searchParams;
@@ -54,12 +62,12 @@ export function authenticate(req: NextRequest): SubUser | null {
   const salt = q.get('s');
   if (token && salt) {
     const expect = crypto.createHash('md5').update(user.app_password + salt).digest('hex');
-    return token.toLowerCase() === expect ? user : null;
+    return safeEqual(token.toLowerCase(), expect) ? user : null;
   }
   let password = q.get('p');
   if (password) {
     if (password.startsWith('enc:')) password = Buffer.from(password.slice(4), 'hex').toString('utf8');
-    return password === user.app_password ? user : null;
+    return safeEqual(password, user.app_password) ? user : null;
   }
   return null;
 }
@@ -98,7 +106,9 @@ export function subsonicResponse(req: NextRequest, body: Body = {}, status: 'ok'
   if (format.startsWith('json')) {
     const json = JSON.stringify({ 'subsonic-response': payload });
     if (format === 'jsonp') {
-      const cb = req.nextUrl.searchParams.get('callback') ?? 'callback';
+      const raw = req.nextUrl.searchParams.get('callback') ?? 'callback';
+      // only allow a plain JS identifier/member path — reject anything that could inject
+      const cb = /^[A-Za-z_$][\w$.]*$/.test(raw) ? raw : 'callback';
       return new Response(`${cb}(${json});`, { headers: { 'Content-Type': 'application/javascript' } });
     }
     return new Response(json, { headers: { 'Content-Type': 'application/json' } });

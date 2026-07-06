@@ -106,10 +106,13 @@ Per-device streaming quality — original files, or transcode to MP3 on the fly 
 | `PORT`              | `3000`   | HTTP port                                            |
 | `SPOTIFY_CLIENT_ID` | _(none)_ | Optional; enables the Spotify taste/playlist import  |
 | `FFMPEG_PATH`       | `ffmpeg` | Path to ffmpeg (bundled in the Docker image)         |
+| `LIDARR_WEBHOOK_SECRET` | _(none)_ | Optional; if set, the Lidarr webhook requires `?token=<secret>` |
 
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
-Webhook pointing at `http://<spotless-host>:3000/api/lidarr/webhook`.
+Webhook pointing at `http://<spotless-host>:3000/api/lidarr/webhook`. If you set
+`LIDARR_WEBHOOK_SECRET`, append `?token=<secret>` to that URL — otherwise the webhook is
+open (fine on a trusted LAN; the rescan it triggers is debounced to prevent flooding).
 
 ### Connecting a mobile app
 
@@ -147,6 +150,8 @@ to the internet as-is.
 Other notes:
 
 - Your music folder is mounted read-only and never modified; all app state lives in `DATA_DIR`
+- `DATA_DIR/library.db` holds generated mobile app passwords in the clear (inherent to the
+  Subsonic protocol) — protect it at rest and don't expose the DB file
 - Nightly DB backups are kept in `DATA_DIR/backups` (last 7)
 - FLAC/OGG/OPUS playback depends on browser codec support (fine in Chromium/Firefox; Safari lacks OGG/OPUS)
 

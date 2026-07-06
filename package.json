@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
-    "music-metadata": "^10.5.0",
+    "music-metadata": "^11.13.0",
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
