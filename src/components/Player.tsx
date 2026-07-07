@@ -6,6 +6,8 @@ import { usePathname } from 'next/navigation';
 import { usePlayer } from '@/store/player';
 import { useLikes } from '@/store/likes';
 import { fmtDuration } from '@/lib/format';
+import { attachEq } from '@/lib/eq';
+import type { Track } from '@/lib/types';
 import Lyrics from './Lyrics';
 import {
   PlayIcon,
@@ -68,15 +70,19 @@ export default function Player() {
   const dragFrom = useRef<number | null>(null);
 
   const track = index >= 0 ? queue[index] : null;
+  const isStation = Boolean(track?.streamUrl); // live internet radio: no seek, no like, no scrobble
   const nextIndex = index + 1 < queue.length ? index + 1 : repeat === 'all' && queue.length > 0 ? 0 : -1;
   const nextTrack = nextIndex >= 0 ? queue[nextIndex] : null;
 
   const els = () => [audioARef.current, audioBRef.current] as const;
-  const streamPath = (id: number) => `/api/stream/${id}${qualityQuery()}`;
+  const streamSrc = (t: Track) => t.streamUrl ?? `/api/stream/${t.id}${qualityQuery()}`;
   // match on the base path (ignoring the quality query) so changing quality mid-session
   // doesn't force-reload the current track; anchor to avoid 12 matching 123
-  const hasSrc = (a: HTMLAudioElement | null, id: number) =>
-    !!a && (a.src.includes(`/api/stream/${id}?`) || a.src.endsWith(`/api/stream/${id}`));
+  const hasSrc = (a: HTMLAudioElement | null, t: Track) =>
+    !!a &&
+    (t.streamUrl
+      ? a.src.includes(t.streamUrl)
+      : a.src.includes(`/api/stream/${t.id}?`) || a.src.endsWith(`/api/stream/${t.id}`));
 
   // navigating anywhere closes the full-screen player and popups
   useEffect(() => {
@@ -91,27 +97,37 @@ export default function Player() {
     fadingRef.current = false;
   };
 
+  // EQ: route both elements through the filter chain (no-op until the user enables it);
+  // listens for settings changes so first-time enable attaches mid-session
+  useEffect(() => {
+    const attach = () => els().forEach((a) => attachEq(a));
+    attach();
+    window.addEventListener('eq-changed', attach);
+    return () => window.removeEventListener('eq-changed', attach);
+  }, []);
+
   // load current track into the active element (skip when a fade already put it there)
   useEffect(() => {
     const a = els()[active];
     if (!a || !track) return;
-    if (!hasSrc(a, track.id)) {
+    if (!hasSrc(a, track)) {
       cancelFade();
       const other = els()[1 - active];
       if (other) {
         other.pause();
         other.removeAttribute('src');
       }
-      a.src = streamPath(track.id);
+      a.src = streamSrc(track);
       a.volume = Math.min(1, volume * gainMult(track.gain));
       a.play().catch(() => {});
       setProgress(0);
     }
-    fetch('/api/history', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ trackId: track.id }),
-    }).catch(() => {});
+    if (track.id > 0)
+      fetch('/api/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackId: track.id }),
+      }).catch(() => {});
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: track.title,
@@ -124,12 +140,13 @@ export default function Player() {
   }, [track?.id]);
 
   // preload the upcoming track into the idle element for gapless/crossfade starts
+  // (skip live stations — nothing to preload, and buffering a live stream wastes bandwidth)
   useEffect(() => {
     const other = els()[1 - active];
     if (!other || fadingRef.current) return;
-    if (nextTrack && !hasSrc(other, nextTrack.id)) {
+    if (nextTrack && !nextTrack.streamUrl && !hasSrc(other, nextTrack)) {
       other.preload = 'auto';
-      other.src = streamPath(nextTrack.id);
+      other.src = streamSrc(nextTrack);
       other.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -137,7 +154,7 @@ export default function Player() {
 
   // radio: when the last queued track starts, top the queue up in advance
   useEffect(() => {
-    if (!radio || !track || index !== queue.length - 1 || radioFetchingRef.current) return;
+    if (!radio || !track || track.streamUrl || index !== queue.length - 1 || radioFetchingRef.current) return;
     radioFetchingRef.current = true;
     const exclude = queue.slice(-200).map((t) => t.id).join(',');
     fetch(`/api/radio?seed=${track.id}&exclude=${exclude}`)
@@ -179,7 +196,7 @@ export default function Player() {
     const a = els()[active];
     const b = els()[1 - active];
     if (!a || !b || !nextTrack) return;
-    if (!hasSrc(b, nextTrack.id)) b.src = streamPath(nextTrack.id);
+    if (!hasSrc(b, nextTrack)) b.src = streamSrc(nextTrack);
     fadingRef.current = true;
     b.volume = 0;
     b.play().catch(() => {
@@ -222,7 +239,8 @@ export default function Player() {
 
   const onDuration = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     if (e.currentTarget !== els()[active]) return;
-    setDuration(e.currentTarget.duration || 0);
+    const d = e.currentTarget.duration;
+    setDuration(Number.isFinite(d) ? d : 0); // live streams report Infinity
   };
 
   const onEnded = (e: React.SyntheticEvent<HTMLAudioElement>) => {
@@ -234,7 +252,7 @@ export default function Player() {
       return;
     }
     const b = els()[1 - active];
-    if (nextTrack && b && hasSrc(b, nextTrack.id)) {
+    if (nextTrack && b && hasSrc(b, nextTrack)) {
       // gapless: preloaded element starts instantly
       b.volume = Math.min(1, volume * gainMult(nextTrack.gain));
       b.play().catch(() => {});
@@ -376,16 +394,18 @@ export default function Player() {
               <div className="truncate text-sm font-medium">{track.title}</div>
               <div className="truncate text-xs text-subdued">{track.artist}</div>
             </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                likes.toggle(track.id);
-              }}
-              className={`rounded-full p-2 ${likes.ids.has(track.id) ? 'text-accent' : 'text-subdued'}`}
-              aria-label={likes.ids.has(track.id) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
-            >
-              <HeartIcon size={18} filled={likes.ids.has(track.id)} />
-            </button>
+            {!isStation && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  likes.toggle(track.id);
+                }}
+                className={`rounded-full p-2 ${likes.ids.has(track.id) ? 'text-accent' : 'text-subdued'}`}
+                aria-label={likes.ids.has(track.id) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+              >
+                <HeartIcon size={18} filled={likes.ids.has(track.id)} />
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -436,37 +456,56 @@ export default function Player() {
             <div className="mt-6">
               <div className="mb-4 flex items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <Link href={`/album/${track.albumId}`} onClick={() => setExpanded(false)} className="block truncate text-xl font-bold">
-                    {track.title}
-                  </Link>
-                  <Link href={`/artist/${track.artistId}`} onClick={() => setExpanded(false)} className="block truncate text-sm text-subdued">
-                    {track.artist}
-                  </Link>
+                  {isStation ? (
+                    <>
+                      <div className="block truncate text-xl font-bold">{track.title}</div>
+                      <div className="block truncate text-sm text-subdued">{track.artist}</div>
+                    </>
+                  ) : (
+                    <>
+                      <Link href={`/album/${track.albumId}`} onClick={() => setExpanded(false)} className="block truncate text-xl font-bold">
+                        {track.title}
+                      </Link>
+                      <Link href={`/artist/${track.artistId}`} onClick={() => setExpanded(false)} className="block truncate text-sm text-subdued">
+                        {track.artist}
+                      </Link>
+                    </>
+                  )}
                 </div>
-                <button
-                  onClick={() => likes.toggle(track.id)}
-                  className={`rounded-full p-2 ${likes.ids.has(track.id) ? 'text-accent' : 'text-subdued'}`}
-                  aria-label={likes.ids.has(track.id) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
-                >
-                  <HeartIcon size={22} filled={likes.ids.has(track.id)} />
-                </button>
+                {!isStation && (
+                  <button
+                    onClick={() => likes.toggle(track.id)}
+                    className={`rounded-full p-2 ${likes.ids.has(track.id) ? 'text-accent' : 'text-subdued'}`}
+                    aria-label={likes.ids.has(track.id) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+                  >
+                    <HeartIcon size={22} filled={likes.ids.has(track.id)} />
+                  </button>
+                )}
               </div>
 
-              <input
-                type="range"
-                min={0}
-                max={duration || 1}
-                step={0.5}
-                value={progress}
-                onChange={(e) => seek(Number(e.target.value))}
-                className="w-full"
-                style={{ ['--fill' as string]: pct(progress, duration) }}
-                aria-label="Seek"
-              />
-              <div className="mt-1 flex justify-between text-xs tabular-nums text-subdued">
-                <span>{fmtDuration(progress)}</span>
-                <span>{fmtDuration(duration)}</span>
-              </div>
+              {isStation ? (
+                <div className="flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-[0.1em] text-accent">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Live
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 1}
+                    step={0.5}
+                    value={progress}
+                    onChange={(e) => seek(Number(e.target.value))}
+                    className="w-full"
+                    style={{ ['--fill' as string]: pct(progress, duration) }}
+                    aria-label="Seek"
+                  />
+                  <div className="mt-1 flex justify-between text-xs tabular-nums text-subdued">
+                    <span>{fmtDuration(progress)}</span>
+                    <span>{fmtDuration(duration)}</span>
+                  </div>
+                </>
+              )}
 
               <div className="mt-4 flex items-center justify-center gap-6">
                 <button
@@ -519,8 +558,9 @@ export default function Player() {
                 </button>
                 <button
                   onClick={() => setShowLyrics((v) => !v)}
-                  className={`rounded-full p-2 ${showLyrics ? 'text-accent' : 'text-subdued'}`}
+                  className={`rounded-full p-2 ${showLyrics ? 'text-accent' : 'text-subdued'} disabled:opacity-40`}
                   aria-label="Lyrics"
+                  disabled={isStation}
                 >
                   <MicIcon size={20} />
                 </button>
@@ -537,21 +577,32 @@ export default function Player() {
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/api/artwork/${track.albumId}`} alt="" className="h-12 w-12 rounded object-cover" />
                 <div className="min-w-0">
-                  <Link href={`/album/${track.albumId}`} className="block truncate text-sm font-medium hover:underline">
-                    {track.title}
-                  </Link>
-                  <Link href={`/artist/${track.artistId}`} className="block truncate text-xs text-subdued hover:text-white hover:underline">
-                    {track.artist}
-                  </Link>
+                  {isStation ? (
+                    <>
+                      <div className="block truncate text-sm font-medium">{track.title}</div>
+                      <div className="block truncate text-xs text-subdued">{track.artist}</div>
+                    </>
+                  ) : (
+                    <>
+                      <Link href={`/album/${track.albumId}`} className="block truncate text-sm font-medium hover:underline">
+                        {track.title}
+                      </Link>
+                      <Link href={`/artist/${track.artistId}`} className="block truncate text-xs text-subdued hover:text-white hover:underline">
+                        {track.artist}
+                      </Link>
+                    </>
+                  )}
                 </div>
-                <button
-                  onClick={() => likes.toggle(track.id)}
-                  className={`rounded-full p-2 ${likes.ids.has(track.id) ? 'text-accent' : 'text-subdued hover:text-white'}`}
-                  title="Like"
-                  aria-label={likes.ids.has(track.id) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
-                >
-                  <HeartIcon size={18} filled={likes.ids.has(track.id)} />
-                </button>
+                {!isStation && (
+                  <button
+                    onClick={() => likes.toggle(track.id)}
+                    className={`rounded-full p-2 ${likes.ids.has(track.id) ? 'text-accent' : 'text-subdued hover:text-white'}`}
+                    title="Like"
+                    aria-label={likes.ids.has(track.id) ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
+                  >
+                    <HeartIcon size={18} filled={likes.ids.has(track.id)} />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -593,19 +644,27 @@ export default function Player() {
               </button>
             </div>
             <div className="hidden w-full max-w-xl items-center gap-2 md:flex">
-              <span className="w-10 text-right text-xs tabular-nums text-subdued">{fmtDuration(progress)}</span>
-              <input
-                type="range"
-                min={0}
-                max={duration || 1}
-                step={0.5}
-                value={progress}
-                onChange={(e) => seek(Number(e.target.value))}
-                className="flex-1"
-                style={{ ['--fill' as string]: pct(progress, duration) }}
-                aria-label="Seek"
-              />
-              <span className="w-10 text-xs tabular-nums text-subdued">{fmtDuration(duration)}</span>
+              {isStation ? (
+                <div className="flex flex-1 items-center justify-center gap-2 text-xs font-bold uppercase tracking-[0.1em] text-accent">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" /> Live
+                </div>
+              ) : (
+                <>
+                  <span className="w-10 text-right text-xs tabular-nums text-subdued">{fmtDuration(progress)}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 1}
+                    step={0.5}
+                    value={progress}
+                    onChange={(e) => seek(Number(e.target.value))}
+                    className="flex-1"
+                    style={{ ['--fill' as string]: pct(progress, duration) }}
+                    aria-label="Seek"
+                  />
+                  <span className="w-10 text-xs tabular-nums text-subdued">{fmtDuration(duration)}</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -634,7 +693,7 @@ export default function Player() {
               className={`rounded-full p-2 ${showLyrics ? 'text-accent' : 'text-subdued hover:text-white'}`}
               title="Lyrics"
               aria-label="Lyrics"
-              disabled={!track}
+              disabled={!track || isStation}
             >
               <MicIcon size={18} />
             </button>

@@ -1,5 +1,5 @@
 export interface Track {
-  id: number;
+  id: number; // negative for internet radio stations (id = -stationId)
   title: string;
   artist: string;
   artistId: number;
@@ -11,6 +11,31 @@ export interface Track {
   genre: string | null;
   gain?: number | null;
   playCount?: number;
+  streamUrl?: string; // set for internet radio stations — played directly, no library track behind it
+}
+
+export interface RadioStation {
+  id: number;
+  name: string;
+  streamUrl: string;
+  homePageUrl: string | null;
+}
+
+/** Queue entry for an internet radio station. */
+export function stationTrack(s: RadioStation): Track {
+  return {
+    id: -s.id,
+    title: s.name,
+    artist: 'Internet radio',
+    artistId: 0,
+    album: s.name,
+    albumId: 0,
+    duration: 0,
+    trackNo: 0,
+    discNo: 1,
+    genre: null,
+    streamUrl: `/api/stations/${s.id}/stream`,
+  };
 }
 
 export interface Album {

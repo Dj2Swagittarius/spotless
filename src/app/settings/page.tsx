@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import FolderPicker from '@/components/FolderPicker';
 import { XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
+import { loadEq, saveEq, EQ_PRESETS, EQ_FREQS, EQ_MIN, EQ_MAX, type EqState } from '@/lib/eq';
 
 interface SpotifyStatus {
   connected: boolean;
@@ -60,6 +61,7 @@ export default function SettingsPage() {
   // playback
   const [crossfade, setCrossfade] = useState(0);
   const [quality, setQuality] = useState('raw');
+  const [eq, setEq] = useState<EqState | null>(null);
   const radio = usePlayer((s) => s.radio);
   const toggleRadio = usePlayer((s) => s.toggleRadio);
 
@@ -105,6 +107,7 @@ export default function SettingsPage() {
     } catch {
       // ignore
     }
+    setEq(loadEq());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -208,6 +211,11 @@ export default function SettingsPage() {
     await fetch('/api/spotify/status', { method: 'DELETE' });
     const s = await fetch('/api/spotify/status').then((r) => r.json());
     setSpotify(s);
+  };
+
+  const updateEq = (s: EqState) => {
+    setEq(s);
+    saveEq(s);
   };
 
   const saveLastfmKeys = async () => {
@@ -425,6 +433,73 @@ export default function SettingsPage() {
             />
           </button>
         </div>
+
+        {eq && (
+          <div className="mt-6 border-t border-highlight pt-4">
+            <div className="mb-3 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium">Equalizer</div>
+                <p className="text-sm text-subdued">Shape the sound with a preset or your own curve. Applies to this device.</p>
+              </div>
+              <button
+                onClick={() => updateEq({ ...eq, enabled: !eq.enabled })}
+                role="switch"
+                aria-checked={eq.enabled}
+                aria-label="Equalizer"
+                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${eq.enabled ? 'bg-accent' : 'bg-border'}`}
+              >
+                <span
+                  className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-all ${eq.enabled ? 'left-6' : 'left-1'}`}
+                />
+              </button>
+            </div>
+            <div className={eq.enabled ? '' : 'pointer-events-none opacity-40'}>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {Object.keys(EQ_PRESETS).map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => updateEq({ ...eq, preset: name, gains: EQ_PRESETS[name].slice() })}
+                    className={`rounded-full px-3 py-1 text-xs font-medium ${
+                      eq.preset === name ? 'bg-white text-black' : 'bg-highlight text-white hover:bg-press'
+                    }`}
+                  >
+                    {name}
+                  </button>
+                ))}
+                {eq.preset === 'Custom' && (
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-black">Custom</span>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                {EQ_FREQS.map((freq, i) => (
+                  <div key={freq} className="flex items-center gap-3">
+                    <span className="w-10 text-right text-xs tabular-nums text-subdued">
+                      {freq >= 1000 ? `${freq / 1000}K` : freq}
+                    </span>
+                    <input
+                      type="range"
+                      min={EQ_MIN}
+                      max={EQ_MAX}
+                      step={0.5}
+                      value={eq.gains[i]}
+                      onChange={(e) => {
+                        const gains = eq.gains.slice();
+                        gains[i] = Number(e.target.value);
+                        updateEq({ ...eq, preset: 'Custom', gains });
+                      }}
+                      className="flex-1"
+                      style={{ ['--fill' as string]: `${((eq.gains[i] - EQ_MIN) / (EQ_MAX - EQ_MIN)) * 100}%` }}
+                      aria-label={`${freq} Hz gain`}
+                    />
+                    <span className="w-12 text-xs tabular-nums text-subdued">
+                      {eq.gains[i] > 0 ? '+' : ''}{eq.gains[i]} dB
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </Section>
 
       <Section title="Spotify">

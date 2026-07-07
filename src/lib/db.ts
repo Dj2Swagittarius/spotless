@@ -97,6 +97,13 @@ export function getDb(): Database.Database {
       requested_at TEXT NOT NULL DEFAULT (datetime('now')),
       resolved_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS radio_stations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      stream_url TEXT NOT NULL,
+      home_page_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
   return db;
 }

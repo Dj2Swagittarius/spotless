@@ -76,6 +76,9 @@ export default function LibraryPage() {
         <button className={tabClass('playlists')} onClick={() => setTab('playlists')}>Playlists</button>
         <button className={tabClass('albums')} onClick={() => setTab('albums')}>Albums</button>
         <button className={tabClass('artists')} onClick={() => setTab('artists')}>Artists</button>
+        <Link href="/radios" className="rounded-full bg-highlight px-4 py-1.5 text-sm font-medium text-white hover:bg-press">
+          Radio
+        </Link>
         <button
           onClick={() => setMine((v) => !v)}
           className={`rounded-full px-4 py-1.5 text-sm font-medium ${mine ? 'bg-accent text-black' : 'bg-highlight text-white hover:bg-press'}`}

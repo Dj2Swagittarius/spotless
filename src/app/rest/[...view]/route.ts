@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 import { getDb, artDir } from '@/lib/db';
 import { scrobbleTrack, updateNowPlaying } from '@/lib/lastfm';
 import { scanLibrary, scanStatus } from '@/lib/scanner';
+import { listStations, createStation, updateStation, deleteStation, validStreamUrl } from '@/lib/stations';
 import { serveTrack } from '@/lib/streaming';
 import { ADMIN_USER_ID } from '@/lib/user';
 import {
@@ -483,6 +484,44 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
       },
     }),
 
+  getInternetRadioStations: (ctx) =>
+    subsonicResponse(ctx.req, {
+      internetRadioStations: {
+        internetRadioStation: listStations().map((s) => ({
+          id: `ir-${s.id}`,
+          name: s.name,
+          streamUrl: s.streamUrl,
+          ...(s.homePageUrl ? { homePageUrl: s.homePageUrl } : {}),
+        })),
+      },
+    }),
+
+  createInternetRadioStation: (ctx) => {
+    if (ctx.user.id !== ADMIN_USER_ID) return subsonicError(ctx.req, 50, 'admin only');
+    const name = ctx.q.get('name') ?? '';
+    const streamUrl = ctx.q.get('streamUrl') ?? '';
+    if (!name || !validStreamUrl(streamUrl)) return subsonicError(ctx.req, 10, 'name and streamUrl required');
+    createStation(name, streamUrl, ctx.q.get('homepageUrl'));
+    return subsonicResponse(ctx.req);
+  },
+
+  updateInternetRadioStation: (ctx) => {
+    if (ctx.user.id !== ADMIN_USER_ID) return subsonicError(ctx.req, 50, 'admin only');
+    const id = Number((ctx.q.get('id') ?? '').replace(/^ir-/, ''));
+    const name = ctx.q.get('name') ?? '';
+    const streamUrl = ctx.q.get('streamUrl') ?? '';
+    if (!id || !name || !validStreamUrl(streamUrl)) return subsonicError(ctx.req, 10, 'id, name and streamUrl required');
+    if (!updateStation(id, name, streamUrl, ctx.q.get('homepageUrl'))) return subsonicError(ctx.req, 70, 'station not found');
+    return subsonicResponse(ctx.req);
+  },
+
+  deleteInternetRadioStation: (ctx) => {
+    if (ctx.user.id !== ADMIN_USER_ID) return subsonicError(ctx.req, 50, 'admin only');
+    const id = Number((ctx.q.get('id') ?? '').replace(/^ir-/, ''));
+    if (!id || !deleteStation(id)) return subsonicError(ctx.req, 70, 'station not found');
+    return subsonicResponse(ctx.req);
+  },
+
   getScanStatus: (ctx) => {
     const s = scanStatus();
     const count = (db().prepare('SELECT COUNT(*) AS n FROM tracks').get() as { n: number }).n;
@@ -500,7 +539,6 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   savePlayQueue: (ctx) => subsonicResponse(ctx.req),
   getBookmarks: (ctx) => subsonicResponse(ctx.req, { bookmarks: {} }),
   getPodcasts: (ctx) => subsonicResponse(ctx.req, { podcasts: {} }),
-  getInternetRadioStations: (ctx) => subsonicResponse(ctx.req, { internetRadioStations: {} }),
   getShares: (ctx) => subsonicResponse(ctx.req, { shares: {} }),
   getNowPlaying: (ctx) => subsonicResponse(ctx.req, { nowPlaying: {} }),
 };
