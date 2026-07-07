@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { NextRequest } from 'next/server';
 import { getDb, artDir } from '@/lib/db';
+import { scrobbleTrack, updateNowPlaying } from '@/lib/lastfm';
 import { scanLibrary, scanStatus } from '@/lib/scanner';
 import { serveTrack } from '@/lib/streaming';
 import { ADMIN_USER_ID } from '@/lib/user';
@@ -352,13 +353,18 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
 
   scrobble: (ctx) => {
     const submission = ctx.q.get('submission') !== 'false';
-    if (submission) {
-      for (const raw of ctx.q.getAll('id')) {
-        const sid = parseSid(raw);
-        if (sid?.kind === 'track')
-          db().prepare('INSERT INTO history (track_id, user_id) VALUES (?, ?)').run(sid.id, ctx.user.id);
+    const times = ctx.q.getAll('time'); // ms epoch, parallel to id per Subsonic spec
+    ctx.q.getAll('id').forEach((raw, i) => {
+      const sid = parseSid(raw);
+      if (sid?.kind !== 'track') return;
+      if (submission) {
+        db().prepare('INSERT INTO history (track_id, user_id) VALUES (?, ?)').run(sid.id, ctx.user.id);
+        const timeMs = Number(times[i]);
+        scrobbleTrack(ctx.user.id, sid.id, Number.isFinite(timeMs) && timeMs > 0 ? Math.floor(timeMs / 1000) : undefined);
+      } else {
+        updateNowPlaying(ctx.user.id, sid.id);
       }
-    }
+    });
     return subsonicResponse(ctx.req);
   },
 

@@ -36,6 +36,13 @@ export default function SettingsPage() {
   // spotify
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
 
+  // last.fm
+  const [lastfm, setLastfm] = useState<{ configured: boolean; connected: boolean; username: string | null } | null>(null);
+  const [lfmKey, setLfmKey] = useState('');
+  const [lfmSecret, setLfmSecret] = useState('');
+  const [lfmMsg, setLfmMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [lfmBusy, setLfmBusy] = useState(false);
+
   // lidarr
   const [lidarrUrl, setLidarrUrl] = useState('');
   const [lidarrKey, setLidarrKey] = useState('');
@@ -79,6 +86,7 @@ export default function SettingsPage() {
   useEffect(() => {
     fetch('/api/settings/music-dir').then((r) => r.json()).then((d) => setMusicDir(d.dir)).catch(() => {});
     fetch('/api/spotify/status').then((r) => r.json()).then(setSpotify).catch(() => {});
+    fetch('/api/lastfm/status').then((r) => r.json()).then(setLastfm).catch(() => {});
     fetch('/api/settings/lidarr')
       .then((r) => r.json())
       .then((d) => {
@@ -200,6 +208,33 @@ export default function SettingsPage() {
     await fetch('/api/spotify/status', { method: 'DELETE' });
     const s = await fetch('/api/spotify/status').then((r) => r.json());
     setSpotify(s);
+  };
+
+  const saveLastfmKeys = async () => {
+    setLfmBusy(true);
+    setLfmMsg(null);
+    const res = await fetch('/api/lastfm/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: lfmKey, secret: lfmSecret }),
+    });
+    const data = await res.json();
+    setLfmBusy(false);
+    if (!res.ok) {
+      setLfmMsg({ ok: false, text: data.error || 'Failed' });
+      return;
+    }
+    setLfmKey('');
+    setLfmSecret('');
+    setLfmMsg({ ok: true, text: 'API keys saved — now connect your account below.' });
+    const s = await fetch('/api/lastfm/status').then((r) => r.json());
+    setLastfm(s);
+  };
+
+  const disconnectLastfm = async () => {
+    await fetch('/api/lastfm/status', { method: 'DELETE' });
+    const s = await fetch('/api/lastfm/status').then((r) => r.json());
+    setLastfm(s);
   };
 
   const unhide = async (name: string) => {
@@ -410,6 +445,53 @@ export default function SettingsPage() {
             <div className="mb-3 text-sm text-subdued">Not connected. Seeds Discover with your Spotify taste.</div>
             <a href="/api/spotify/login" className="btn-primary inline-block">
               Connect Spotify
+            </a>
+          </>
+        )}
+      </Section>
+
+      <Section title="Last.fm">
+        {!lastfm?.configured ? (
+          me?.isAdmin ? (
+            <>
+              <div className="mb-3 text-sm text-subdued">
+                Scrobble every play to Last.fm. Create a free API account at{' '}
+                <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer" className="text-white underline">
+                  last.fm/api/account/create
+                </a>{' '}
+                (any name, callback URL can stay blank), then paste the API key and shared secret here.
+              </div>
+              <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                <input className={input} value={lfmKey} onChange={(e) => setLfmKey(e.target.value)} placeholder="API key" />
+                <input className={input} value={lfmSecret} onChange={(e) => setLfmSecret(e.target.value)} type="password" placeholder="Shared secret" />
+              </div>
+              {lfmMsg && (
+                <div className={`mb-3 rounded px-3 py-2 text-sm ${lfmMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+                  {lfmMsg.text}
+                </div>
+              )}
+              <button className={btn} onClick={saveLastfmKeys} disabled={lfmBusy || !lfmKey.trim() || !lfmSecret.trim()}>
+                {lfmBusy ? 'Testing…' : 'Test & save'}
+              </button>
+            </>
+          ) : (
+            <div className="text-sm text-subdued">Not set up yet — ask the admin to add a Last.fm API key first.</div>
+          )
+        ) : lastfm.connected ? (
+          <>
+            <div className="mb-3 text-sm text-subdued">
+              <span className="font-medium text-accent">✓ Scrobbling as {lastfm.username}.</span> Every play (web and
+              mobile apps) is sent to your Last.fm profile.
+            </div>
+            <button className={btn} onClick={disconnectLastfm}>Disconnect</button>
+          </>
+        ) : (
+          <>
+            <div className="mb-3 text-sm text-subdued">
+              Not connected. Link your Last.fm account to scrobble everything you play.
+            </div>
+            <a href="/api/lastfm/login" className="btn-primary inline-block">
+              Connect Last.fm
             </a>
           </>
         )}
