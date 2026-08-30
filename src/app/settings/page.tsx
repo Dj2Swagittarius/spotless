@@ -5,6 +5,17 @@ import FolderPicker from '@/components/FolderPicker';
 import { XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
 import { loadEq, saveEq, EQ_PRESETS, EQ_FREQS, EQ_MIN, EQ_MAX, type EqState } from '@/lib/eq';
+import {
+  RUNGS,
+  autoRung,
+  loadQuality,
+  onNetworkChange,
+  readNetwork,
+  saveQuality as persistQuality,
+  type NetworkInfo,
+  type QualityId,
+  type Rung,
+} from '@/lib/adaptive';
 
 interface SpotifyStatus {
   connected: boolean;
@@ -60,7 +71,8 @@ export default function SettingsPage() {
 
   // playback
   const [crossfade, setCrossfade] = useState(0);
-  const [quality, setQuality] = useState('raw');
+  const [quality, setQuality] = useState<QualityId>('raw');
+  const [auto, setAuto] = useState<{ rung: Rung; net: NetworkInfo } | null>(null);
   const [eq, setEq] = useState<EqState | null>(null);
   const radio = usePlayer((s) => s.radio);
   const toggleRadio = usePlayer((s) => s.toggleRadio);
@@ -103,7 +115,7 @@ export default function SettingsPage() {
     loadArt();
     try {
       setCrossfade(Number(localStorage.getItem('crossfade') ?? 0) || 0);
-      setQuality(localStorage.getItem('streamQuality') ?? 'raw');
+      setQuality(loadQuality());
     } catch {
       // ignore
     }
@@ -120,14 +132,22 @@ export default function SettingsPage() {
     }
   };
 
-  const saveQuality = (v: string) => {
+  const saveQuality = (v: QualityId) => {
     setQuality(v);
-    try {
-      localStorage.setItem('streamQuality', v);
-    } catch {
-      // ignore
-    }
+    persistQuality(v);
   };
+
+  // live readout of what Auto is picking; refreshes as the connection changes
+  useEffect(() => {
+    const read = () => setAuto({ rung: autoRung(), net: readNetwork() });
+    read();
+    const off = onNetworkChange(read);
+    const t = setInterval(read, 5000); // stall-driven changes come from the player
+    return () => {
+      off();
+      clearInterval(t);
+    };
+  }, []);
 
   const loadDupes = async () => {
     setDupesLoading(true);
@@ -376,12 +396,7 @@ export default function SettingsPage() {
       <Section title="Playback">
         <label className="mb-2 block text-sm font-medium">Streaming quality</label>
         <div className="flex flex-wrap gap-2">
-          {[
-            { id: 'raw', label: 'Original' },
-            { id: 'high', label: 'High · 320' },
-            { id: 'normal', label: 'Normal · 192' },
-            { id: 'saver', label: 'Data saver · 128' },
-          ].map((o) => (
+          {[{ id: 'auto' as const, label: 'Auto' }, ...RUNGS.map((r) => ({ id: r.id, label: r.label }))].map((o) => (
             <button
               key={o.id}
               onClick={() => saveQuality(o.id)}
@@ -393,6 +408,18 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
+        {quality === 'auto' && auto && (
+          <p className="mt-2 text-sm text-accent">
+            Now streaming at {auto.rung.label} — {auto.net.label}
+            {!auto.net.supported && ' (this browser reports no network details, so Auto starts here and drops a tier whenever playback stutters)'}
+          </p>
+        )}
+        <p className="mb-5 mt-2 text-sm text-subdued">
+          Auto follows your connection: full quality on Wi-Fi, a lighter stream on mobile data,
+          and a step down whenever playback starts to stutter — so a song keeps going instead of
+          cutting out. It picks up where it left off, not from the top of the track, and moves back
+          up once the connection settles.
+        </p>
         <p className="mb-5 mt-2 text-sm text-subdued">
           Original streams your files untouched — best quality, no server work. The lower tiers
           transcode to MP3 on the fly to save data and storage; the difference is subtle at 192kbps

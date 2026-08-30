@@ -7,6 +7,17 @@ import { usePlayer } from '@/store/player';
 import { useLikes } from '@/store/likes';
 import { fmtDuration } from '@/lib/format';
 import { attachEq } from '@/lib/eq';
+import {
+  RUNGS,
+  currentRung,
+  deferPreload,
+  isLower,
+  loadQuality,
+  noteStall,
+  onNetworkChange,
+  streamQuery,
+  type Rung,
+} from '@/lib/adaptive';
 import type { Track } from '@/lib/types';
 import Lyrics from './Lyrics';
 import {
@@ -36,16 +47,20 @@ function crossfadeSec(): number {
   }
 }
 
-// stream quality: 'raw' (original file) or a target bitrate the server transcodes to
-const QUALITY_BITRATE: Record<string, number> = { high: 320, normal: 192, saver: 128 };
-function qualityQuery(): string {
-  try {
-    const br = QUALITY_BITRATE[localStorage.getItem('streamQuality') ?? 'raw'];
-    return br ? `?format=mp3&maxBitRate=${br}` : '';
-  } catch {
-    return '';
-  }
-}
+// Auto mode reloads the playing track at a lower rung when it rebuffers; this is the
+// floor between two such switches, so a rough patch walks down the ladder instead of
+// collapsing to Data saver on one bad moment.
+const SWITCH_COOLDOWN_MS = 8000;
+// Swapping the source (a downshift, or a seek on a transcode) makes the element buffer
+// by definition — don't score that against the connection.
+const STALL_GRACE_MS = 4000;
+// Ceiling on reloads of one track, so bad tags or a dead server can't wedge the player
+// in a retry loop — after this it gives up and moves on like any other failed track.
+const MAX_RESTREAMS_PER_TRACK = 4;
+// How far before the end of a track the next one is fetched when the preload is being
+// held back — enough lead time for the gapless/crossfade handoff, without spending the
+// whole song downloading two streams over one weak connection.
+const PRELOAD_LEAD_S = 45;
 
 export default function Player() {
   const audioARef = useRef<HTMLAudioElement>(null);
@@ -54,6 +69,8 @@ export default function Player() {
   const fadingRef = useRef(false);
   const fadeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const radioFetchingRef = useRef(false);
+  const lastSwitchRef = useRef(0);
+  const restreamsRef = useRef(0);
 
   const { queue, index, isPlaying, shuffle, repeat, volume, radio } = usePlayer();
   const { toggle, next, prev, jumpTo, toggleShuffle, cycleRepeat, setVolume, setPlaying, toggleRadio, appendTracks, moveInQueue } =
@@ -75,7 +92,18 @@ export default function Player() {
   const nextTrack = nextIndex >= 0 ? queue[nextIndex] : null;
 
   const els = () => [audioARef.current, audioBRef.current] as const;
-  const streamSrc = (t: Track) => t.streamUrl ?? `/api/stream/${t.id}${qualityQuery()}`;
+
+  // Each element remembers the rung and start offset of the stream it holds, so a
+  // downshift can compare against what is actually playing (not what the ladder said
+  // when the track loaded) and resume at the right second after the source swap.
+  const rungOf = (a: HTMLAudioElement | null) =>
+    RUNGS.find((r) => r.id === a?.dataset.rung) ?? currentRung();
+  const offsetOf = (a: HTMLAudioElement | null) => Number(a?.dataset.offset ?? 0) || 0;
+  const setSrc = (a: HTMLAudioElement, t: Track, rung: Rung, offset = 0) => {
+    a.dataset.rung = rung.id;
+    a.dataset.offset = String(offset);
+    a.src = t.streamUrl ?? `/api/stream/${t.id}${streamQuery(rung, offset)}`;
+  };
   // match on the base path (ignoring the quality query) so changing quality mid-session
   // doesn't force-reload the current track; anchor to avoid 12 matching 123
   const hasSrc = (a: HTMLAudioElement | null, t: Track) =>
@@ -110,6 +138,9 @@ export default function Player() {
   useEffect(() => {
     const a = els()[active];
     if (!a || !track) return;
+    // seed from the tagged length: a transcoded pipe may never report a usable duration
+    setDuration(track.streamUrl ? 0 : track.duration || 0);
+    restreamsRef.current = 0;
     if (!hasSrc(a, track)) {
       cancelFade();
       const other = els()[1 - active];
@@ -117,7 +148,7 @@ export default function Player() {
         other.pause();
         other.removeAttribute('src');
       }
-      a.src = streamSrc(track);
+      setSrc(a, track, currentRung());
       a.volume = Math.min(1, volume * gainMult(track.gain));
       a.play().catch(() => {});
       setProgress(0);
@@ -144,13 +175,14 @@ export default function Player() {
   useEffect(() => {
     const other = els()[1 - active];
     if (!other || fadingRef.current) return;
+    if (deferPreload() && duration > 0 && duration - progress > Math.max(PRELOAD_LEAD_S, crossfadeSec())) return;
     if (nextTrack && !nextTrack.streamUrl && !hasSrc(other, nextTrack)) {
       other.preload = 'auto';
-      other.src = streamSrc(nextTrack);
+      setSrc(other, nextTrack, currentRung());
       other.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextTrack?.id, active]);
+  }, [nextTrack?.id, active, progress, duration]);
 
   // radio: when the last queued track starts, top the queue up in advance
   useEffect(() => {
@@ -196,7 +228,7 @@ export default function Player() {
     const a = els()[active];
     const b = els()[1 - active];
     if (!a || !b || !nextTrack) return;
-    if (!hasSrc(b, nextTrack)) b.src = streamSrc(nextTrack);
+    if (!hasSrc(b, nextTrack)) setSrc(b, nextTrack, currentRung());
     fadingRef.current = true;
     b.volume = 0;
     b.play().catch(() => {
@@ -220,32 +252,133 @@ export default function Player() {
     }, 100);
   };
 
+  /**
+   * Reload the active element at `rung`, resuming from wherever playback is now via
+   * ?offset= instead of restarting the track. This is both halves of adaptive quality:
+   * stepping down a rung when the connection can't keep up, and recovering a transcode
+   * that died mid-song (a transcode is a one-shot pipe — once the browser loses it,
+   * there are no byte ranges to range-request your way back with, so playback just
+   * stops where the buffer ran out).
+   * Returns false if it declined (cooldown, or too many retries on this track).
+   */
+  const restream = (a: HTMLAudioElement, rung: Rung): boolean => {
+    if (!track || track.streamUrl) return false; // live stations have no rungs to pick from
+    if (Date.now() - lastSwitchRef.current < SWITCH_COOLDOWN_MS) return false;
+    if (restreamsRef.current >= MAX_RESTREAMS_PER_TRACK) return false;
+    lastSwitchRef.current = Date.now();
+    restreamsRef.current += 1;
+    const at = offsetOf(a) + (Number.isFinite(a.currentTime) ? a.currentTime : 0);
+    cancelFade();
+    setSrc(a, track, rung, at);
+    if (rung.bitrate === 0 && at > 0) {
+      // the original file is byte-range seekable, so it resumes by seeking rather than
+      // by asking the server to start the stream somewhere else
+      a.addEventListener('loadedmetadata', () => {
+        try {
+          a.currentTime = at;
+        } catch {
+          // element was reused for another track in the meantime
+        }
+      }, { once: true });
+    }
+    a.volume = Math.min(1, volume * gainMult(track.gain));
+    setProgress(at);
+    if (isPlaying) a.play().catch(() => {});
+
+    // bring the already-preloaded next track down too, so it doesn't hit the same wall
+    const other = els()[1 - active];
+    if (other && nextTrack && !nextTrack.streamUrl && hasSrc(other, nextTrack) && isLower(rung, rungOf(other))) {
+      setSrc(other, nextTrack, rung);
+      other.pause();
+    }
+    return true;
+  };
+
+  /** Rung we should be on right now: the ladder in Auto, otherwise the fixed choice. */
+  const wantedRung = (a: HTMLAudioElement) => (loadQuality() === 'auto' ? currentRung() : rungOf(a));
+
+  // rebuffering is the signal the network hints can't give us — a weak cell still
+  // reports itself as "4g" right up until the music stops
+  const onWaiting = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const a = e.currentTarget;
+    if (a !== els()[active] || fadingRef.current) return;
+    if (!track || track.streamUrl || a.seeking) return;
+    if (Date.now() - lastSwitchRef.current < STALL_GRACE_MS) return; // our own source swap
+    const auto = loadQuality() === 'auto';
+    if (auto) noteStall();
+    const have = rungOf(a);
+    const want = auto ? currentRung() : have;
+    const at = offsetOf(a) + a.currentTime;
+    // at the very start of a track, buffering is just buffering — only act on it if the
+    // ladder has actually dropped below what we asked for
+    if (at <= 0 && !isLower(want, have)) return;
+    // a raw file re-buffers on its own via byte ranges; a transcode never will
+    if (!isLower(want, have) && have.bitrate === 0) return;
+    restream(a, want);
+  };
+
+  // a failed request used to end the song then and there — the element just sits at the
+  // point the network dropped. Pick it back up from there instead.
+  const onError = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const a = e.currentTarget;
+    if (a !== els()[active] || fadingRef.current) return;
+    if (!track || track.streamUrl) return;
+    // 4 = source/codec not supported: retrying that is just a loop
+    if (a.error && a.error.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) return;
+    if (loadQuality() === 'auto') noteStall();
+    restream(a, wantedRung(a));
+  };
+
+  // connection changed (wifi dropped to LTE, LTE degraded): only ever act on it
+  // mid-track to go down — an upgrade waits for the next track rather than
+  // reloading a song that is playing fine
+  useEffect(() => {
+    return onNetworkChange(() => {
+      const a = els()[active];
+      if (!a || loadQuality() !== 'auto' || fadingRef.current) return;
+      const want = currentRung();
+      if (isLower(want, rungOf(a))) restream(a, want);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, track?.id, isPlaying, volume]);
+
   const onTime = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     const a = e.currentTarget;
     if (a !== els()[active]) return;
-    setProgress(a.currentTime);
+    const pos = offsetOf(a) + a.currentTime;
+    setProgress(pos);
     const cf = crossfadeSec();
     if (
       cf > 0 &&
       !fadingRef.current &&
       nextTrack &&
       repeat !== 'one' &&
-      a.duration > cf &&
-      a.duration - a.currentTime <= cf
+      duration > cf &&
+      duration - pos <= cf
     ) {
       startFade(cf);
     }
   };
 
   const onDuration = (e: React.SyntheticEvent<HTMLAudioElement>) => {
-    if (e.currentTarget !== els()[active]) return;
-    const d = e.currentTarget.duration;
-    setDuration(Number.isFinite(d) ? d : 0); // live streams report Infinity
+    const a = e.currentTarget;
+    if (a !== els()[active]) return;
+    const d = a.duration;
+    // live streams report Infinity; a transcode started at an offset reports only the
+    // remainder (or nothing at all), so prefer the tagged length for library tracks
+    if (track && !track.streamUrl && track.duration > 0) setDuration(track.duration);
+    else setDuration(Number.isFinite(d) ? d + offsetOf(a) : 0);
   };
 
   const onEnded = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     const a = e.currentTarget;
     if (a !== els()[active] || fadingRef.current) return;
+    // a transcode pipe that dies cleanly reads as end-of-stream: the song "ends" early.
+    // If we're well short of the tagged length, pick the stream back up instead.
+    if (track && !track.streamUrl && rungOf(a).bitrate > 0 && track.duration > 0) {
+      const at = offsetOf(a) + a.currentTime;
+      if (track.duration - at > 5 && restream(a, wantedRung(a))) return;
+    }
     if (repeat === 'one') {
       a.currentTime = 0;
       a.play().catch(() => {});
@@ -296,7 +429,15 @@ export default function Player() {
     if (!a) return;
     cancelFade();
     a.volume = Math.min(1, volume * gainMult(track?.gain));
-    a.currentTime = v;
+    const rung = rungOf(a);
+    if (track && !track.streamUrl && rung.bitrate > 0) {
+      // transcodes are an unseekable pipe — restart it at the target second instead
+      lastSwitchRef.current = Date.now();
+      setSrc(a, track, rung, v);
+      if (isPlaying) a.play().catch(() => {});
+    } else {
+      a.currentTime = v - offsetOf(a);
+    }
     setProgress(v);
   };
 
@@ -308,6 +449,9 @@ export default function Player() {
     onEnded,
     onPlay: (e: React.SyntheticEvent<HTMLAudioElement>) => onPlayPause(e, true),
     onPause: (e: React.SyntheticEvent<HTMLAudioElement>) => onPlayPause(e, false),
+    onWaiting,
+    onStalled: onWaiting,
+    onError,
   };
 
   return (
