@@ -14,7 +14,8 @@ Point it at a folder of music and it gives your household a fast dark-themed pla
 | --- | --- |
 | ![Trending](docs/trending.png) | ![Stats](docs/stats.png) |
 
-Per-device streaming quality — original files, or transcode to MP3 on the fly to save data:
+Per-device streaming quality — original files, a fixed MP3 tier, or **Auto**, which follows your
+connection and steps down when the network can't keep up:
 
 ![Streaming quality](docs/settings-playback.png)
 
@@ -28,6 +29,9 @@ Per-device streaming quality — original files, or transcode to MP3 on the fly 
 
 **Player**
 - Gapless playback and configurable crossfade (0–12s), dual-audio-element engine
+- Adaptive streaming quality (Auto): full quality on Wi-Fi, a lighter stream on mobile data,
+  and a step down the moment playback starts to stutter — the song resumes from where it was,
+  not from the top. Recovers a stream that dies mid-song instead of leaving it stalled
 - Radio mode: any song seeds an endless queue of similar tracks from your own library
 - Queue with drag-to-reorder, shuffle, repeat (off/all/one), sleep timer
 - ReplayGain volume normalization (read from tags)

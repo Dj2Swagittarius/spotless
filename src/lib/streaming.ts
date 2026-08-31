@@ -57,6 +57,7 @@ export interface ServeOptions {
   format?: string | null; // mp3 | ogg | opus | aac | raw
   maxBitRate?: number; // kbps; 0 = no limit requested
   download?: boolean; // force the original file
+  offset?: number; // seconds to start the transcode at (adaptive quality switches mid-track)
 }
 
 export async function serveTrack(req: Request, filePath: string, opts: ServeOptions = {}): Promise<Response> {
@@ -72,22 +73,41 @@ export async function serveTrack(req: Request, filePath: string, opts: ServeOpti
   // transcode via ffmpeg; falls back to the raw file if ffmpeg isn't available
   const fmt = ['mp3', 'ogg', 'opus', 'aac'].includes(format) ? format : 'mp3';
   const br = Math.min(Math.max(maxBitRate || 192, 32), 320);
-  const args = ['-v', 'error', '-i', filePath, '-map', '0:a:0', '-vn'];
+  // -ss before -i seeks by keyframe/packet before decoding: near-instant, and the pipe
+  // then starts at the requested second so a quality switch resumes instead of restarting
+  const offset = Math.max(0, opts.offset ?? 0);
+  const args = ['-v', 'error'];
+  if (offset > 0) args.push('-ss', offset.toFixed(3));
+  args.push('-i', filePath, '-map', '0:a:0', '-vn');
   if (fmt === 'mp3') args.push('-c:a', 'libmp3lame', '-b:a', `${br}k`, '-f', 'mp3');
   else if (fmt === 'opus') args.push('-c:a', 'libopus', '-b:a', `${br}k`, '-f', 'ogg');
   else if (fmt === 'ogg') args.push('-c:a', 'libvorbis', '-b:a', `${br}k`, '-f', 'ogg');
   else args.push('-c:a', 'aac', '-b:a', `${br}k`, '-f', 'adts');
   args.push('pipe:1');
 
-  const proc = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  const proc = spawn(FFMPEG, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   const spawned = await new Promise<boolean>((resolve) => {
     proc.once('error', () => resolve(false));
     proc.once('spawn', () => resolve(true));
   });
   if (!spawned) return raw();
+
+  // An ffmpeg that dies partway through reads to the browser as a clean end of stream:
+  // the song just stops early, with nothing in the log to say why. Keep its complaint.
+  let stderr = '';
+  proc.stderr?.on('data', (d: Buffer) => {
+    if (stderr.length < 2000) stderr += d.toString();
+  });
+  proc.once('close', (code, signal) => {
+    if (code && signal !== 'SIGKILL')
+      console.warn(`[stream] ffmpeg exited ${code} transcoding ${filePath}${stderr ? `: ${stderr.trim()}` : ''}`);
+  });
+
   req.signal.addEventListener('abort', () => proc.kill('SIGKILL'));
   const mime = fmt === 'mp3' ? 'audio/mpeg' : fmt === 'aac' ? 'audio/aac' : 'audio/ogg';
   return new Response(Readable.toWeb(proc.stdout) as ReadableStream, {
-    headers: { 'Content-Type': mime, 'Cache-Control': 'no-store' },
+    // say plainly that this one is not range-resumable, so a client doesn't drop the
+    // connection expecting to range-request its way back into a stream that has no ranges
+    headers: { 'Content-Type': mime, 'Cache-Control': 'no-store', 'Accept-Ranges': 'none' },
   });
 }
