@@ -20,6 +20,7 @@ import {
 } from '@/lib/adaptive';
 import type { Track } from '@/lib/types';
 import Lyrics from './Lyrics';
+import AddToPlaylist from './AddToPlaylist';
 import {
   PlayIcon,
   PauseIcon,
@@ -517,6 +518,7 @@ export default function Player() {
                 </span>
               </button>
               <div className="text-xs text-subdued">{fmtDuration(t.duration)}</div>
+              {t.id > 0 && <AddToPlaylist track={t} className="rounded-full p-2 text-subdued hover:text-white" />}
             </div>
           ))}
           </div>
@@ -625,6 +627,7 @@ export default function Player() {
                     <HeartIcon size={22} filled={likes.ids.has(track.id)} />
                   </button>
                 )}
+                {!isStation && <AddToPlaylist track={track} size={22} className="rounded-full p-2 text-subdued" />}
               </div>
 
               {isStation ? (
@@ -747,6 +750,7 @@ export default function Player() {
                     <HeartIcon size={18} filled={likes.ids.has(track.id)} />
                   </button>
                 )}
+                {!isStation && <AddToPlaylist track={track} size={18} className="rounded-full p-2 text-subdued hover:text-white" />}
               </>
             )}
           </div>

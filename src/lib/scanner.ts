@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { resolvePlaceholders } from './playlistMatch';
 import { getDb, artDir, getSetting, setSetting } from './db';
 
 const DEFAULT_MUSIC_DIR = process.env.MUSIC_DIR || path.join(process.cwd(), 'music');
@@ -307,6 +308,13 @@ export async function scanLibrary(): Promise<void> {
       DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks);
       DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks);
     `);
+
+    // playlist placeholders (Spotify imports) fill in once the song lands in the library
+    try {
+      resolvePlaceholders(db);
+    } catch (err) {
+      console.warn('scan: placeholder resolve failed:', err);
+    }
 
     const total = (db.prepare('SELECT COUNT(*) AS n FROM tracks').get() as { n: number }).n;
     lastScan = { at: new Date().toISOString(), added, removed, total };

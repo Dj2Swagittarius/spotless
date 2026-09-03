@@ -152,7 +152,8 @@ export function getPlaylists(userId: number): Playlist[] {
   const lists = getDb()
     .prepare(
       `SELECT p.id, p.name, p.description, p.created_at AS createdAt,
-              COUNT(pt.track_id) AS trackCount, COALESCE(SUM(t.duration), 0) AS duration
+              COUNT(pt.track_id) AS trackCount, COALESCE(SUM(t.duration), 0) AS duration,
+              (SELECT COUNT(*) FROM playlist_placeholders pp WHERE pp.playlist_id = p.id) AS missingCount
        FROM playlists p
        LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
        LEFT JOIN tracks t ON t.id = pt.track_id
@@ -168,7 +169,8 @@ export function getPlaylist(id: number): (Playlist & { tracks: Track[] }) | null
   const pl = getDb()
     .prepare(
       `SELECT p.id, p.name, p.description, p.created_at AS createdAt,
-              COUNT(pt.track_id) AS trackCount, COALESCE(SUM(t.duration), 0) AS duration
+              COUNT(pt.track_id) AS trackCount, COALESCE(SUM(t.duration), 0) AS duration,
+              (SELECT COUNT(*) FROM playlist_placeholders pp WHERE pp.playlist_id = p.id) AS missingCount
        FROM playlists p
        LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
        LEFT JOIN tracks t ON t.id = pt.track_id
@@ -176,9 +178,34 @@ export function getPlaylist(id: number): (Playlist & { tracks: Track[] }) | null
     )
     .get(id) as Playlist | undefined;
   if (!pl) return null;
-  const tracks = getDb()
-    .prepare(`${TRACK_SELECT} JOIN playlist_tracks pt ON pt.track_id = t.id WHERE pt.playlist_id = ? ORDER BY pt.position`)
-    .all(id) as Track[];
+  // real tracks and placeholders (songs not in the library) share one position space
+  const real = getDb()
+    .prepare(
+      `${TRACK_SELECT.replace('SELECT t.id,', 'SELECT pt.position AS position, t.id,')} JOIN playlist_tracks pt ON pt.track_id = t.id WHERE pt.playlist_id = ?`
+    )
+    .all(id) as (Track & { position: number })[];
+  const placeholders = getDb()
+    .prepare('SELECT id, position, title, artist, album, duration FROM playlist_placeholders WHERE playlist_id = ?')
+    .all(id) as { id: number; position: number; title: string; artist: string; album: string; duration: number }[];
+  const merged: (Track & { position: number })[] = real.concat(
+    placeholders.map((p) => ({
+      id: 0,
+      title: p.title,
+      artist: p.artist,
+      artistId: 0,
+      album: p.album,
+      albumId: 0,
+      duration: p.duration,
+      trackNo: 0,
+      discNo: 1,
+      genre: null,
+      missing: true,
+      placeholderId: p.id,
+      position: p.position,
+    }))
+  );
+  merged.sort((a, b) => a.position - b.position || (a.missing ? 1 : 0) - (b.missing ? 1 : 0));
+  const tracks = merged.map(({ position: _position, ...t }) => t);
   return { ...pl, artIds: playlistArtIds(id), tracks };
 }
 

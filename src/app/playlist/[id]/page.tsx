@@ -18,6 +18,8 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
   const [pl, setPl] = useState<PlaylistDetail | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [sending, setSending] = useState<string | null>(null);
   const playQueue = usePlayer((s) => s.playQueue);
   const router = useRouter();
 
@@ -37,6 +39,9 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
         <RowListSkeleton count={8} />
       </div>
     );
+
+  const playable = pl.tracks.filter((t) => !t.missing);
+  const missing = pl.tracks.filter((t) => t.missing);
 
   const rename = async (name: string) => {
     await fetch(`/api/playlists/${id}`, {
@@ -58,6 +63,11 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
     load();
   };
 
+  const removePlaceholder = async (placeholderId: number) => {
+    await fetch(`/api/playlists/${id}/tracks?placeholderId=${placeholderId}`, { method: 'DELETE' });
+    load();
+  };
+
   const reorder = async (from: number, to: number) => {
     const tracks = pl.tracks.slice();
     const [moved] = tracks.splice(from, 1);
@@ -66,8 +76,39 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
     await fetch(`/api/playlists/${id}/tracks`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order: tracks.map((t) => t.id) }),
+      body: JSON.stringify({ items: tracks.map((t) => (t.missing ? `p:${t.placeholderId}` : `t:${t.id}`)) }),
     }).catch(() => load());
+  };
+
+  // re-match placeholders against the library (a rescan does this too)
+  const checkAgain = async () => {
+    setChecking('Checking…');
+    const r = await fetch(`/api/playlists/${id}/resolve`, { method: 'POST' })
+      .then((r) => r.json())
+      .catch(() => null);
+    setChecking(r ? `${r.resolved} found` : 'Failed');
+    load();
+    setTimeout(() => setChecking(null), 2000);
+  };
+
+  // one Lidarr add per unique album — grabbing the album gets the song
+  const sendMissing = async () => {
+    const albums = new Map<string, { artist: string; album: string }>();
+    for (const m of missing) albums.set(`${m.artist}|${m.album}`.toLowerCase(), { artist: m.artist, album: m.album });
+    const list = [...albums.values()];
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < list.length; i++) {
+      setSending(`Sending ${i + 1}/${list.length}…`);
+      const res = await fetch('/api/lidarr/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(list[i]),
+      }).catch(() => null);
+      if (res?.ok) ok++;
+      else fail++;
+    }
+    setSending(`Done: ${ok} albums sent${fail ? `, ${fail} failed (not on MusicBrainz?)` : ''}`);
   };
 
   return (
@@ -108,14 +149,15 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
           </h1>
           <div className="text-sm text-subdued">
             {pl.trackCount} songs, {fmtTotal(pl.duration)}
+            {missing.length > 0 && <span className="text-warning"> · {missing.length} missing</span>}
           </div>
         </div>
       </header>
 
       <div className="flex items-center gap-4">
         <button
-          onClick={() => playQueue(pl.tracks, 0)}
-          disabled={pl.tracks.length === 0}
+          onClick={() => playQueue(playable, 0)}
+          disabled={playable.length === 0}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-black shadow-lg transition-transform hover:scale-105 hover:bg-accentBright disabled:opacity-40"
           title="Play"
           aria-label="Play playlist"
@@ -128,10 +170,31 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
         <span className="text-xs text-subdued">drag songs to reorder</span>
       </div>
 
+      {missing.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-elevated px-4 py-3 text-sm">
+          <span className="text-subdued">
+            {missing.length} {missing.length === 1 ? 'song is' : 'songs are'} not in your library yet. Download them and rescan; they fill in automatically.
+          </span>
+          <span className="flex-1" />
+          <div className="flex flex-wrap items-center gap-2">
+            {sending ? (
+              <span className="text-xs text-accent">{sending}</span>
+            ) : (
+              <button onClick={sendMissing} className="btn-pill">
+                ⤓ Send all to Lidarr
+              </button>
+            )}
+            <button onClick={checkAgain} disabled={checking !== null} className="btn-pill">
+              {checking ?? 'Check again'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {pl.tracks.length === 0 ? (
-        <div className="text-subdued">Empty playlist. Find songs via Search and use the ··· menu to add them.</div>
+        <div className="text-subdued">Empty playlist. Use the ··· menu on any song, or in the player, to add it here.</div>
       ) : (
-        <TrackList tracks={pl.tracks} onRemove={removeTrack} onReorder={reorder} />
+        <TrackList tracks={pl.tracks} onRemove={removeTrack} onRemovePlaceholder={removePlaceholder} onReorder={reorder} />
       )}
     </div>
   );

@@ -104,6 +104,19 @@ export function getDb(): Database.Database {
       home_page_url TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    -- songs a playlist wants but the library lacks (Spotify import); share the
+    -- position space with playlist_tracks, invisible to Subsonic clients
+    CREATE TABLE IF NOT EXISTS playlist_placeholders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      album TEXT NOT NULL DEFAULT '',
+      duration REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_placeholders_playlist ON playlist_placeholders(playlist_id);
   `);
   return db;
 }

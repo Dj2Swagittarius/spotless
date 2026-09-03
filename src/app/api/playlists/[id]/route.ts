@@ -22,6 +22,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  getDb().prepare('DELETE FROM playlists WHERE id = ?').run(Number(id));
+  const db = getDb();
+  // foreign_keys pragma is off in this DB, so ON DELETE CASCADE never fires — clean up by hand
+  db.transaction(() => {
+    db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ?').run(Number(id));
+    db.prepare('DELETE FROM playlist_placeholders WHERE playlist_id = ?').run(Number(id));
+    db.prepare('DELETE FROM playlists WHERE id = ?').run(Number(id));
+  })();
   return NextResponse.json({ ok: true });
 }

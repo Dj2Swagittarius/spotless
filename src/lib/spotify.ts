@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { getDb, getSetting, setSetting, delSetting } from './db';
+import { buildLocalIndex, norm, type WantedTrack } from './playlistMatch';
 
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
 /** False when no Spotify app is configured (SPOTIFY_CLIENT_ID env) — connect flow unavailable. */
@@ -210,15 +211,6 @@ async function playlistTracks(userId: number, playlistId: string): Promise<Spoti
   return out;
 }
 
-/** Normalize for matching: lowercase, drop "(feat. …)" / bracket noise and punctuation. */
-function norm(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\((feat|ft|with|remaster)[^)]*\)|\[[^\]]*\]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
 export interface PlaylistImportResult {
   playlistId: number;
   name: string;
@@ -230,50 +222,43 @@ export interface PlaylistImportResult {
 export async function importPlaylist(userId: number, spotifyPlaylistId: string, name: string): Promise<PlaylistImportResult> {
   const wanted = await playlistTracks(userId, spotifyPlaylistId);
   const db = getDb();
+  const index = buildLocalIndex(db);
 
-  const local = db
-    .prepare(
-      `SELECT t.id, t.title, t.duration, a.name AS artist
-       FROM tracks t JOIN artists a ON a.id = t.artist_id`
-    )
-    .all() as { id: number; title: string; duration: number; artist: string }[];
-
-  const byArtistTitle = new Map<string, number>();
-  const byTitle = new Map<string, { id: number; duration: number }[]>();
-  for (const t of local) {
-    const titleKey = norm(t.title);
-    byArtistTitle.set(`${norm(t.artist)}|${titleKey}`, t.id);
-    const list = byTitle.get(titleKey) ?? [];
-    list.push({ id: t.id, duration: t.duration });
-    byTitle.set(titleKey, list);
-  }
-
-  const matchedIds: number[] = [];
+  // keep Spotify's order: matched songs and placeholders (songs not in the
+  // library) share one position space, so the playlist shows what's missing
+  const entries: { position: number; trackId?: number; missing?: WantedTrack }[] = [];
   const missing: PlaylistImportResult['missing'] = [];
-  for (const w of wanted) {
-    const exact = byArtistTitle.get(`${norm(w.artist)}|${norm(w.title)}`);
-    if (exact !== undefined) {
-      matchedIds.push(exact);
-      continue;
+  const seenMissing = new Set<string>();
+  wanted.forEach((w, i) => {
+    const trackId = index.find(w);
+    if (trackId !== undefined) {
+      entries.push({ position: i, trackId });
+      return;
     }
-    // fallback: same title and duration within 5s (covers artist-name spelling differences)
-    const candidates = byTitle.get(norm(w.title)) ?? [];
-    const close = candidates.find((c) => Math.abs(c.duration - w.durationSec) <= 5);
-    if (close) matchedIds.push(close.id);
-    else missing.push({ title: w.title, artist: w.artist, album: w.album });
-  }
+    const key = `${norm(w.artist)}|${norm(w.title)}`;
+    if (seenMissing.has(key)) return;
+    seenMissing.add(key);
+    entries.push({ position: i, missing: w });
+    missing.push({ title: w.title, artist: w.artist, album: w.album });
+  });
+  const matched = entries.filter((e) => e.trackId !== undefined).length;
 
   const insert = db.transaction(() => {
     const res = db
       .prepare('INSERT INTO playlists (name, description, user_id) VALUES (?, ?, ?)')
-      .run(name, `Imported from Spotify (${matchedIds.length}/${wanted.length} matched)`, userId);
+      .run(name, `Imported from Spotify (${matched}/${wanted.length} matched)`, userId);
     const playlistId = Number(res.lastInsertRowid);
-    const add = db.prepare(
-      'INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)'
+    const addTrack = db.prepare('INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)');
+    const addPlaceholder = db.prepare(
+      'INSERT INTO playlist_placeholders (playlist_id, position, title, artist, album, duration) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    matchedIds.forEach((trackId, i) => add.run(playlistId, trackId, i));
+    for (const e of entries) {
+      if (e.trackId !== undefined) addTrack.run(playlistId, e.trackId, e.position);
+      else if (e.missing)
+        addPlaceholder.run(playlistId, e.position, e.missing.title, e.missing.artist, e.missing.album, e.missing.durationSec);
+    }
     return playlistId;
   });
 
-  return { playlistId: insert(), name, matched: matchedIds.length, total: wanted.length, missing };
+  return { playlistId: insert(), name, matched, total: wanted.length, missing };
 }

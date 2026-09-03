@@ -12,6 +12,9 @@ export interface Track {
   gain?: number | null;
   playCount?: number;
   streamUrl?: string; // set for internet radio stations — played directly, no library track behind it
+  // playlist placeholder (song wanted but not in the library): id is 0, cannot play
+  missing?: boolean;
+  placeholderId?: number;
 }
 
 export interface RadioStation {
@@ -63,6 +66,7 @@ export interface Playlist {
   trackCount: number;
   duration: number;
   artIds?: number[];
+  missingCount?: number; // placeholders (songs not in the library)
 }
 
 export interface HomeSection {

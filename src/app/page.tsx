@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { usePlayer } from '@/store/player';
 import { CardGrid, AlbumCard, MixCard } from '@/components/Cards';
+import AddToPlaylist from '@/components/AddToPlaylist';
 import { RowListSkeleton, CardGridSkeleton } from '@/components/Skeleton';
 import { PlayIcon } from '@/components/Icons';
 import type { HomeSection } from '@/lib/types';
@@ -63,18 +64,22 @@ export default function HomePage() {
       {trackSections[0] && (
         <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
           {trackSections[0].tracks!.slice(0, 8).map((t, i) => (
-            <button
+            <div
               key={t.id}
+              role="button"
+              tabIndex={0}
               onClick={() => playQueue(trackSections[0].tracks!, i)}
-              className="group flex items-center gap-2 overflow-hidden rounded bg-white/10 text-left transition-colors hover:bg-white/20"
+              onKeyDown={(e) => e.key === 'Enter' && playQueue(trackSections[0].tracks!, i)}
+              className="group flex cursor-pointer items-center gap-2 overflow-hidden rounded bg-white/10 text-left transition-colors hover:bg-white/20"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/api/artwork/${t.albumId}`} alt="" className="h-12 w-12 shrink-0 object-cover" />
               <span className="min-w-0 flex-1 truncate pr-1 text-sm font-semibold">{t.title}</span>
-              <span className="mr-2 hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 md:flex">
+              <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-black opacity-0 shadow-lg transition-opacity group-hover:opacity-100 md:flex">
                 <PlayIcon size={16} />
               </span>
-            </button>
+              <AddToPlaylist track={t} className="mr-1 shrink-0 rounded-full p-2 text-subdued opacity-60 hover:text-white md:opacity-0 md:group-hover:opacity-100" />
+            </div>
           ))}
         </div>
       )}
@@ -95,18 +100,22 @@ export default function HomePage() {
           <h2 className="mb-4 text-2xl font-bold">{s.title}</h2>
           <div className="grid grid-cols-1 gap-1 lg:grid-cols-2">
             {s.tracks!.map((t, i) => (
-              <button
+              <div
                 key={t.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => playQueue(s.tracks!, i)}
-                className="flex items-center gap-3 rounded p-2 text-left hover:bg-white/10"
+                onKeyDown={(e) => e.key === 'Enter' && playQueue(s.tracks!, i)}
+                className="group flex cursor-pointer items-center gap-3 rounded p-2 text-left hover:bg-white/10"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/api/artwork/${t.albumId}`} alt="" className="h-12 w-12 rounded object-cover" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{t.title}</div>
                   <div className="truncate text-sm text-subdued">{t.artist}</div>
                 </div>
-              </button>
+                <AddToPlaylist track={t} />
+              </div>
             ))}
           </div>
         </section>

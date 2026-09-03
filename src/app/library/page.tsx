@@ -114,7 +114,10 @@ export default function LibraryPage() {
               <PlaylistCover artIds={pl.artIds} size="md" />
               <div>
                 <div className="font-bold">{pl.name}</div>
-                <div className="text-sm text-subdued">Playlist · {pl.trackCount} songs</div>
+                <div className="text-sm text-subdued">
+                  Playlist · {pl.trackCount} songs
+                  {pl.missingCount ? <span className="text-warning"> · {pl.missingCount} missing</span> : null}
+                </div>
               </div>
             </Link>
           ))}
@@ -130,7 +133,7 @@ export default function LibraryPage() {
             </div>
             <div>
               <div className="font-bold">Import from Spotify</div>
-              <div className="text-sm text-subdued">Rebuild your Spotify playlists from local files</div>
+              <div className="text-sm text-subdued">Rebuild your Spotify playlists from local files; songs you don&apos;t own stay as placeholders</div>
             </div>
           </button>
         </div>

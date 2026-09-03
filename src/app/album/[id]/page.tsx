@@ -4,6 +4,7 @@ import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePlayer } from '@/store/player';
 import TrackList from '@/components/TrackList';
+import AddToPlaylist from '@/components/AddToPlaylist';
 import { DetailHeaderSkeleton, RowListSkeleton } from '@/components/Skeleton';
 import { PlayIcon } from '@/components/Icons';
 import { fmtTotal } from '@/lib/format';
@@ -46,13 +47,16 @@ export default function AlbumPage({ params }: { params: Promise<{ id: string }> 
         </div>
       </header>
 
-      <button
-        onClick={() => playQueue(album.tracks, 0)}
-        className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-black shadow-lg transition-transform hover:scale-105 hover:bg-accentBright"
-        title="Play album"
-      >
-        <PlayIcon size={24} />
-      </button>
+      <div className="flex items-center gap-4">
+        <button
+          onClick={() => playQueue(album.tracks, 0)}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-black shadow-lg transition-transform hover:scale-105 hover:bg-accentBright"
+          title="Play album"
+        >
+          <PlayIcon size={24} />
+        </button>
+        <AddToPlaylist tracks={album.tracks} label="Add to playlist" />
+      </div>
 
       <TrackList tracks={album.tracks} showAlbum={false} showArt={false} />
     </div>

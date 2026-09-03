@@ -20,7 +20,11 @@ export default function Sidebar() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    fetch('/api/playlists').then((r) => r.json()).then(setPlaylists).catch(() => {});
+    const load = () => fetch('/api/playlists').then((r) => r.json()).then(setPlaylists).catch(() => {});
+    load();
+    // AddToPlaylist fires this after "New playlist" so the list updates without a route change
+    window.addEventListener('playlists-changed', load);
+    return () => window.removeEventListener('playlists-changed', load);
   }, [pathname]);
 
   useEffect(() => {
@@ -121,7 +125,7 @@ export default function Sidebar() {
                   <PlaylistCover artIds={pl.artIds} size="sm" />
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">{pl.name}</div>
-                    <div className="truncate text-xs text-subdued">Playlist · {pl.trackCount} songs</div>
+                    <div className="truncate text-xs text-subdued">Playlist · {pl.trackCount} songs{pl.missingCount ? ` · ${pl.missingCount} missing` : ""}</div>
                   </div>
                 </Link>
               ))}

@@ -119,7 +119,7 @@ export default function SpotifyImport({ onClose, onImported }: { onClose: () => 
                 {r && r.missing.length > 0 && (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-sm text-subdued hover:text-white">
-                      {r.missing.length} songs not in your library
+                      {r.missing.length} songs not in your library (kept as placeholders)
                       <button
                         onClick={(e) => {
                           e.preventDefault();
