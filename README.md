@@ -2,7 +2,7 @@
 
 Self-hosted, single-container music streamer for your own files, with a Spotify-style interface. Next.js + SQLite, no external database, no accounts, no cloud.
 
-Point it at a folder of music and it gives your household a fast dark-themed player with profiles, discovery, and optional Lidarr/Spotify integrations.
+Point it at a folder of music and it gives your household a fast dark-themed player with profiles, discovery, a 10-band EQ, internet radio, and optional Lidarr, Spotify and Last.fm integrations.
 
 ![Home](docs/home.png)
 
@@ -35,6 +35,10 @@ connection and steps down when the network can't keep up:
 - Radio mode: any song seeds an endless queue of similar tracks from your own library
 - Queue with drag-to-reorder, shuffle, repeat (off/all/one), sleep timer
 - ReplayGain volume normalization (read from tags)
+- 10-band graphic equalizer (31 Hz – 16 kHz, ±12 dB) with 13 presets or your own curve;
+  per device, and switching it off is an exact bypass
+- Internet radio: add any Icecast/Shoutcast stream by URL under **Radio** in the sidebar and it
+  plays through the same player (stations are exposed to Subsonic apps too)
 - Synced lyrics (lrclib.net) with live highlight
 - Media Session API: lock-screen / media-key controls
 - Full-screen mobile now-playing, mini-player, responsive layout, installable PWA manifest
@@ -78,6 +82,9 @@ connection and steps down when the network can't keep up:
 - **Spotify**: per-profile PKCE connect imports your taste (top + saved artists) to seed
   discovery, and can rebuild your Spotify playlists from matching local files. Requires
   creating a (free) Spotify app and setting `SPOTIFY_CLIENT_ID`.
+- **Last.fm**: the admin pastes a Last.fm API key + shared secret once (Settings → Last.fm),
+  then each profile connects its own account. Every play from the web player and from
+  Subsonic apps is scrobbled, with now-playing updates, to whoever is listening.
 
 ## Quick start (Docker)
 
@@ -134,6 +141,12 @@ bitrate/transcoding options are handled by the app.
    `http://127.0.0.1:3000` (a Spotify platform restriction on loopback redirect URIs),
    and each profile that connects must be added under User Management in your
    Spotify app dashboard while the app is in development mode.
+
+### Last.fm setup (optional)
+
+1. Create a free API account at <https://www.last.fm/api/account/create> (any name, callback URL can stay blank)
+2. As the admin profile, paste the API key and shared secret into **Settings → Last.fm** and hit *Test & save*
+3. Each profile then clicks **Connect Last.fm** on the same page to link its own account
 
 ## Local development
 
