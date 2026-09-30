@@ -1,8 +1,10 @@
 # Spotless
 
-Self-hosted, single-container music streamer for your own files, with a Spotify-style interface. Next.js + SQLite, no external database, no accounts, no cloud.
+Fork of [spotless](https://github.com/Dj2Swagittarius/spotless). This fork aims for a more seamless self-hosted Spotify-style app.
 
-Point it at a folder of music and it gives your household a fast dark-themed player with profiles, discovery, a 10-band EQ, internet radio, and optional Lidarr, Spotify and Last.fm integrations.
+Self-hosted, single-container music streamer with a Spotify-style interface.
+
+Point it at a folder of music and it gives you a dark-themed player with profiles, discovery, a 10-band EQ, internet radio, and optional Lidarr, Spotify and Last.fm integrations.
 
 ![Home](docs/home.png)
 
