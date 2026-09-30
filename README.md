@@ -54,6 +54,7 @@ connection and steps down when the network can't keep up:
 - Playlists with drag-reorder and mosaic covers; liked songs; listening stats (tops, activity, periods)
 - Duplicate-file report (same song stored twice, e.g. MP3 + FLAC)
 - Automatic album/artist artwork backfill via Deezer; nightly database backups
+- same-basename .lrc file support added. (so Synced lyrics is supported in the root library folder, if no .lrc files found then LRCLIB fallback is implemented)
 
 **Multi-user**
 - Netflix-style "Who's listening?" profile picker — no passwords, LAN-trust model
