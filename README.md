@@ -1,6 +1,9 @@
 # Spotless
 
-Fork of [spotless](https://github.com/Dj2Swagittarius/spotless). This fork aims for a more seamless self-hosted Spotify-style app.
+Fork of [spotless](https://github.com/Dj2Swagittarius/spotless). 
+
+I created this fork because i want to create an app which I wanted to use  for an more seamless experience.
+This fork aims for a more seamless self-hosted Spotify-style app. 
 
 Self-hosted, single-container music streamer with a Spotify-style interface.
 
