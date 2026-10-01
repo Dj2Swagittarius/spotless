@@ -41,7 +41,8 @@ connection and steps down when the network can't keep up:
   per device, and switching it off is an exact bypass
 - Internet radio: add any Icecast/Shoutcast stream by URL under **Radio** in the sidebar and it
   plays through the same player (stations are exposed to Subsonic apps too)
-- Synced lyrics (lrclib.net) with live highlight
+- Synced lyrics with **local sidecar `.lrc` files taking priority**, followed by cached/LRCLIB
+  fallback when no matching local lyrics file is available
 - Media Session API: lock-screen / media-key controls
 - Full-screen mobile now-playing, mini-player, responsive layout, installable PWA manifest
 
@@ -54,7 +55,9 @@ connection and steps down when the network can't keep up:
 - Playlists with drag-reorder and mosaic covers; liked songs; listening stats (tops, activity, periods)
 - Duplicate-file report (same song stored twice, e.g. MP3 + FLAC)
 - Automatic album/artist artwork backfill via Deezer; nightly database backups
-- same-basename .lrc file support added. (so Synced lyrics is supported in the root library folder, if no .lrc files found then LRCLIB fallback is implemented)
+- Same-basename local `.lrc` sidecar support — for example `Song.flac` + `Song.lrc`.
+  Spotless reads the local file first without modifying the music library; if no local `.lrc`
+  is found, lyrics fall back to the existing SQLite cache and LRCLIB
 
 **Multi-user**
 - Netflix-style "Who's listening?" profile picker — no passwords, LAN-trust model
@@ -68,10 +71,15 @@ connection and steps down when the network can't keep up:
 - "Complete your collection": studio albums you're missing, repackage/remix noise filtered out
 - Trending: country charts with region picker, genre rows, "trending for you" genre blend
 
-**Mobile apps (Subsonic API)**
+**Mobile apps (Subsonic / OpenSubsonic API)**
 - Spotless implements the Subsonic API, so mature native apps work out of the box:
-  **Symfonium**, **DSub**, **Substreamer**, **play:Sub** and friends — with the offline
-  download/sync those apps provide
+  **Amperfy (iOS)**, **Symfonium**, **DSub**, **Substreamer**, **play:Sub** and friends — with
+  the offline download/sync those apps provide
+- Lyrics API support includes both the legacy Subsonic **`getLyrics`** endpoint for plain-text
+  lyrics and OpenSubsonic **`getLyricsBySongId`** via the **`songLyrics` v1** extension for
+  structured synchronized lyrics
+- Compatible clients such as **Amperfy** can receive synced lyrics automatically through the
+  Subsonic/OpenSubsonic API; local same-basename `.lrc` files are preferred over LRCLIB results
 - On-the-fly **transcoding** via ffmpeg (mp3/ogg/opus/aac, client-requested bitrate) for
   streaming big FLAC libraries over mobile data
 - Each profile gets its own generated app password (Settings → Mobile apps); stars,
@@ -85,6 +93,9 @@ connection and steps down when the network can't keep up:
 - **Spotify**: per-profile PKCE connect imports your taste (top + saved artists) to seed
   discovery, and can rebuild your Spotify playlists from matching local files. Requires
   creating a (free) Spotify app and setting `SPOTIFY_CLIENT_ID`.
+  The OAuth callback supports both the default loopback URL and a configurable HTTPS
+  reverse-proxy domain through **Settings → Spotify** or the `SPOTIFY_REDIRECT_URI`
+  environment variable
 - **Last.fm**: the admin pastes a Last.fm API key + shared secret once (Settings → Last.fm),
   then each profile connects its own account. Every play from the web player and from
   Subsonic apps is scrobbled, with now-playing updates, to whoever is listening.
@@ -113,15 +124,15 @@ connection and steps down when the network can't keep up:
 
 ## Configuration
 
-| Env var                | Default                                      | Purpose                                                                        |
-| ---------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
-| `MUSIC_DIR`            | `/music`                                     | Folder scanned for audio files                                                 |
-| `DATA_DIR`             | `/data`                                      | SQLite DB, extracted album art, nightly backups                                |
-| `PORT`                 | `3000`                                       | HTTP port                                                                      |
-| `SPOTIFY_CLIENT_ID`    | _(none)_                                     | Optional; enables the Spotify taste/playlist import                            |
-| `SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
-| `FFMPEG_PATH`          | `ffmpeg`                                     | Path to ffmpeg (bundled in the Docker image)                                   |
-| `LIDARR_WEBHOOK_SECRET`| _(none)_                                     | Optional; if set, the Lidarr webhook requires `?token=<secret>`                |
+| Env var                 | Default                                      | Purpose                                                                        |
+| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `MUSIC_DIR`             | `/music`                                     | Folder scanned for audio files                                                 |
+| `DATA_DIR`              | `/data`                                      | SQLite DB, extracted album art, nightly backups                                |
+| `PORT`                  | `3000`                                       | HTTP port                                                                      |
+| `SPOTIFY_CLIENT_ID`     | _(none)_                                     | Optional; enables the Spotify taste/playlist import                            |
+| `SPOTIFY_REDIRECT_URI`  | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
+| `FFMPEG_PATH`           | `ffmpeg`                                     | Path to ffmpeg (bundled in the Docker image)                                   |
+| `LIDARR_WEBHOOK_SECRET` | _(none)_                                     | Optional; if set, the Lidarr webhook requires `?token=<secret>`                |
 
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
@@ -132,29 +143,76 @@ open (fine on a trusted LAN; the rescan it triggers is debounced to prevent floo
 ### Connecting a mobile app
 
 Open **Settings → Mobile apps** on the profile you want to use — it shows the server URL,
-username and a generated app password. Add those as a Subsonic server in Symfonium, DSub,
-Substreamer, play:Sub or any other Subsonic-compatible client. Downloads/offline mode and
-bitrate/transcoding options are handled by the app.
+username and a generated app password. Add those as a Subsonic server in Amperfy, Symfonium,
+DSub, Substreamer, play:Sub or any other compatible client.
+
+Spotless supports both:
+
+- Legacy Subsonic **`getLyrics`** for plain-text lyrics
+- OpenSubsonic **`getLyricsBySongId`** through **`songLyrics` v1** for synchronized,
+  timestamped lyrics
+
+When synchronized lyrics are requested, Spotless first looks for a same-basename `.lrc`
+file beside the audio file:
+
+```text
+/music/Artist/Album/Song.flac
+/music/Artist/Album/Song.lrc
+```
+
+If a local `.lrc` exists, it takes priority. Otherwise Spotless uses its cached lyrics and
+falls back to LRCLIB. Compatible apps such as **Amperfy** can therefore display synchronized
+lyrics directly from your local music library.
+
+Downloads/offline mode and bitrate/transcoding options are handled by the client app.
 
 ### Spotify setup (optional)
 
 1. Create an app at <https://developer.spotify.com/dashboard>.
 2. Set `SPOTIFY_CLIENT_ID` to the app's client ID (no secret needed — Spotless uses PKCE).
 3. Choose the callback you will use:
-   - Local/default: `http://127.0.0.1:3000/api/spotify/callback`
-   - Reverse proxy: open **Settings → Spotify** as the admin and enter your public domain,
-     for example `music.example.com`. Spotless will use
-     `https://music.example.com/api/spotify/callback`.
-   - Alternatively set the deployment-level `SPOTIFY_REDIRECT_URI` environment variable to
-     the full callback URI. A value saved in Settings takes precedence over the environment variable.
+   - **Local/default:** `http://127.0.0.1:3000/api/spotify/callback`
+   - **Reverse proxy:** open **Settings → Spotify** as the admin and enter your public domain,
+     for example:
+
+     ```text
+     music.example.com
+     ```
+
+     Spotless will automatically use:
+
+     ```text
+     https://music.example.com/api/spotify/callback
+     ```
+
+   - Alternatively, set the deployment-level `SPOTIFY_REDIRECT_URI` environment variable to
+     the complete callback URI:
+
+     ```text
+     SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
+     ```
+
+   - A domain saved in **Settings → Spotify** takes precedence over
+     `SPOTIFY_REDIRECT_URI`. If neither is configured, Spotless falls back to
+     `http://127.0.0.1:3000/api/spotify/callback`.
+
 4. Add the **exact** callback URI shown in Settings to your Spotify app's Redirect URIs.
-   Spotify requires HTTPS for non-loopback web redirects; plain HTTP is allowed only for loopback IP
-   literals such as `127.0.0.1`, and `localhost` is not accepted.
-5. Click **Connect Spotify**. If a public callback domain is configured and you opened Spotless through
-   a LAN/IP address, Spotless redirects the browser to the configured public origin before starting
-   OAuth so the PKCE cookie and callback use the same origin.
-6. While the Spotify app is in development mode, add each Spotify account that will connect under
-   User Management in the Spotify developer dashboard.
+
+   For example:
+
+   ```text
+   https://music.example.com/api/spotify/callback
+   ```
+
+   Spotify requires HTTPS for non-loopback web redirects. Plain HTTP is supported for
+   loopback IP literals such as `127.0.0.1`.
+
+5. Click **Connect Spotify**. If a public callback domain is configured and you opened
+   Spotless through a LAN/IP address, Spotless redirects the browser to the configured
+   public origin before starting OAuth so the PKCE flow and callback use the same origin.
+
+6. While the Spotify app is in development mode, add each Spotify account that will connect
+   under User Management in the Spotify developer dashboard.
 
 ### Last.fm setup (optional)
 
