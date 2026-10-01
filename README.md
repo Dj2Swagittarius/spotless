@@ -5,6 +5,8 @@ Fork of [spotless](https://github.com/Dj2Swagittarius/spotless).
 I created this fork because i want to create an app which I wanted to use  for an more seamless experience.
 This fork aims for a more seamless self-hosted Spotify-style app. 
 
+Disclaimer: I'm not a developer. Just a passionate guy who developed an APP with the helo of AI.
+
 Self-hosted, single-container music streamer with a Spotify-style interface.
 
 Point it at a folder of music and it gives you a dark-themed player with profiles, discovery, a 10-band EQ, internet radio, and optional Lidarr, Spotify and Last.fm integrations.
