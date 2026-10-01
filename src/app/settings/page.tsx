@@ -32,6 +32,26 @@ interface SpotifyRedirectConfig {
   source: 'setting' | 'environment' | 'default';
 }
 
+interface ScanStatus {
+  scanning: boolean;
+  lastScan: { at: string; added: number; removed: number; total: number } | null;
+  lastScanError: { at: string; message: string } | null;
+  autoScanIntervalMinutes: number;
+  nextAutoScanAt: string | null;
+}
+
+const AUTO_SCAN_OPTIONS = [
+  { value: 0, label: 'Off' },
+  { value: 5, label: 'Every 5 minutes' },
+  { value: 15, label: 'Every 15 minutes' },
+  { value: 30, label: 'Every 30 minutes' },
+  { value: 60, label: 'Every 1 hour' },
+  { value: 180, label: 'Every 3 hours' },
+  { value: 360, label: 'Every 6 hours' },
+  { value: 720, label: 'Every 12 hours' },
+  { value: 1440, label: 'Every 24 hours' },
+];
+
 interface Dislike {
   name: string;
   disliked_at: string;
@@ -52,6 +72,11 @@ export default function SettingsPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanInfo, setScanInfo] = useState<string>('');
+  const [scanError, setScanError] = useState<string>('');
+  const [autoScanInterval, setAutoScanInterval] = useState(0);
+  const [nextAutoScanAt, setNextAutoScanAt] = useState<string | null>(null);
+  const [scanScheduleBusy, setScanScheduleBusy] = useState(false);
+  const [scanScheduleMsg, setScanScheduleMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // spotify
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
@@ -104,9 +129,14 @@ export default function SettingsPage() {
   const loadScan = () =>
     fetch('/api/scan')
       .then((r) => r.json())
-      .then((s) => {
+      .then((s: ScanStatus) => {
         setScanning(s.scanning);
-        if (s.lastScan) setScanInfo(`Last scan: ${new Date(s.lastScan.at).toLocaleString()} — ${s.lastScan.total} tracks`);
+        setAutoScanInterval(s.autoScanIntervalMinutes ?? 0);
+        setNextAutoScanAt(s.nextAutoScanAt ?? null);
+        setScanError(s.lastScanError?.message ?? '');
+        if (s.lastScan) {
+          setScanInfo(`Last scan: ${new Date(s.lastScan.at).toLocaleString()} — ${s.lastScan.total} tracks`);
+        }
       })
       .catch(() => {});
 
@@ -141,6 +171,11 @@ export default function SettingsPage() {
       // ignore
     }
     setEq(loadEq());
+
+    // Keep automatic scans, errors and the next scheduled run visible while
+    // the Settings page stays open.
+    const scanPoll = setInterval(loadScan, 5000);
+    return () => clearInterval(scanPoll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -213,6 +248,35 @@ export default function SettingsPage() {
         setScanning(false);
       }
     }, 1500);
+  };
+
+  const saveAutoScanInterval = async (minutes: number) => {
+    setScanScheduleBusy(true);
+    setScanScheduleMsg(null);
+
+    const res = await fetch('/api/scan', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intervalMinutes: minutes }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setScanScheduleBusy(false);
+
+    if (!res.ok) {
+      setScanScheduleMsg({ ok: false, text: data.error || 'Could not save automatic refresh interval' });
+      loadScan();
+      return;
+    }
+
+    setAutoScanInterval(data.autoScanIntervalMinutes ?? minutes);
+    setNextAutoScanAt(data.nextAutoScanAt ?? null);
+    setScanScheduleMsg({
+      ok: true,
+      text:
+        minutes === 0
+          ? 'Automatic library refresh disabled.'
+          : `Automatic library refresh set to ${AUTO_SCAN_OPTIONS.find((o) => o.value === minutes)?.label.toLowerCase() ?? `${minutes} minutes`}.`,
+    });
   };
 
   const saveLidarr = async () => {
@@ -438,7 +502,41 @@ export default function SettingsPage() {
           <div className="mb-3 text-sm text-subdued">
             Folder: <span className="text-white">{musicDir || '…'}</span>
           </div>
-          {scanInfo && <div className="mb-3 text-sm text-subdued">{scanInfo}</div>}
+          {scanInfo && <div className="mb-2 text-sm text-subdued">{scanInfo}</div>}
+          {scanError && (
+            <div className="mb-3 rounded bg-red-950/40 px-3 py-2 text-sm text-red-300">
+              Last scan failed: {scanError}
+            </div>
+          )}
+
+          <div className="mb-4 max-w-sm">
+            <label className="mb-1 block text-sm font-medium">Automatic library refresh</label>
+            <select
+              className={input}
+              value={autoScanInterval}
+              onChange={(e) => saveAutoScanInterval(Number(e.target.value))}
+              disabled={scanScheduleBusy}
+            >
+              {AUTO_SCAN_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-subdued">
+              {autoScanInterval === 0
+                ? 'Off — Spotless still scans once at server startup and whenever you click Rescan now.'
+                : nextAutoScanAt
+                  ? `Next automatic scan: ${new Date(nextAutoScanAt).toLocaleString()}. A manual scan resets this timer.`
+                  : 'Automatic refresh is enabled; the next run will be scheduled after the current scan finishes.'}
+            </p>
+            {scanScheduleMsg && (
+              <p className={`mt-2 text-xs ${scanScheduleMsg.ok ? 'text-accent' : 'text-red-400'}`}>
+                {scanScheduleMsg.text}
+              </p>
+            )}
+          </div>
+
           <div className="mb-3 flex flex-wrap gap-2">
             <button className={btn} onClick={() => setPickerOpen(true)}>Change folder</button>
             <button className={btn} onClick={rescan} disabled={scanning}>

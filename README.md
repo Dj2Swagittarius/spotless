@@ -58,6 +58,9 @@ connection and steps down when the network can't keep up:
 - Playlists with drag-reorder and mosaic covers; liked songs; listening stats (tops, activity, periods)
 - Duplicate-file report (same song stored twice, e.g. MP3 + FLAC)
 - Automatic album/artist artwork backfill via Deezer; nightly database backups
+- Optional automatic library refresh from **Settings → Music library**: Off by default, or
+  every 5 / 15 / 30 minutes, 1 / 3 / 6 / 12 / 24 hours. Scans never overlap, unchanged
+  files are skipped using their modification time, and a manual rescan resets the next timer
 - Same-basename local `.lrc` sidecar support — for example `Song.flac` + `Song.lrc`.
   Spotless reads the local file first without modifying the music library; if no local `.lrc`
   is found, lyrics fall back to the existing SQLite cache and LRCLIB
@@ -136,6 +139,12 @@ connection and steps down when the network can't keep up:
 | `SPOTIFY_REDIRECT_URI`  | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
 | `FFMPEG_PATH`           | `ffmpeg`                                     | Path to ffmpeg (bundled in the Docker image)                                   |
 | `LIDARR_WEBHOOK_SECRET` | _(none)_                                     | Optional; if set, the Lidarr webhook requires `?token=<secret>`                |
+
+Automatic library refresh is configured inside **Settings → Music library** and is stored
+in `DATA_DIR/library.db`; no environment variable is required. The default is **Off**.
+Spotless still performs its existing startup scan and manual/Lidarr-triggered scans when
+automatic refresh is disabled. Recurring intervals are measured from the completion of the
+latest scan, so scans do not overlap.
 
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
