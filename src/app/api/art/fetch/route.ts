@@ -11,7 +11,12 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const denied = requireAdmin(req);
   if (denied) return denied;
-  // fire and forget; poll GET for status
-  fetchMissingArt().catch((err) => console.error('art fetch failed:', err));
+
+  if (artStatus().running) {
+    return NextResponse.json({ started: false, reason: 'artwork fetch already running', ...artStatus() }, { status: 202 });
+  }
+
+  // Fire and forget; the Settings page polls GET for progress/completion.
+  fetchMissingArt().catch(() => {});
   return NextResponse.json({ started: true });
 }

@@ -5,13 +5,18 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    # environment:
+    environment:
+      # Dedicated write mount used only for optional generated .lrc sidecars.
+      - MUSIC_WRITE_DIR=/music-write
     #   # optional — enables the Spotify taste/playlist import (see README)
     #   - SPOTIFY_CLIENT_ID=your_spotify_app_client_id
     #   # optional deployment default for reverse-proxy OAuth; Settings → Spotify can override it
     #   - SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
     volumes:
-      # left side: your music folder on the host (read-only; never modified)
+      # Main application access stays read-only.
       - /path/to/your/music:/music:ro
+      # Optional synced-lyrics writer: same host library mounted separately read/write.
+      # Spotless writes only generated same-basename .lrc sidecars through this path.
+      - /path/to/your/music:/music-write:rw
       # persistent app data (database, extracted album art, backups)
       - ./data:/data

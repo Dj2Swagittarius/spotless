@@ -57,13 +57,15 @@ connection and steps down when the network can't keep up:
 - Search: fuzzy local search plus "not in your library" results from Deezer with 30-second previews
 - Playlists with drag-reorder and mosaic covers; liked songs; listening stats (tops, activity, periods)
 - Duplicate-file report (same song stored twice, e.g. MP3 + FLAC)
-- Automatic album/artist artwork backfill via Deezer; nightly database backups
+- Album/artist artwork repair: local `cover`/`folder`/`front` images first, then conservative exact-match Deezer backfill; nightly database backups
 - Optional automatic library refresh from **Settings → Music library**: Off by default, or
   every 5 / 15 / 30 minutes, 1 / 3 / 6 / 12 / 24 hours. Scans never overlap, unchanged
   files are skipped using their modification time, and a manual rescan resets the next timer
 - Same-basename local `.lrc` sidecar support — for example `Song.flac` + `Song.lrc`.
-  Spotless reads the local file first without modifying the music library; if no local `.lrc`
-  is found, lyrics fall back to the existing SQLite cache and LRCLIB
+  Spotless reads local sidecars first; if none exists, playback/API lyrics fall back to the SQLite cache and LRCLIB
+- Optional **automatic synced `.lrc` download** from **Settings → Music library**. After every successful
+  library scan, Spotless checks tracks missing a sidecar, requests **synchronized lyrics only** from LRCLIB,
+  and saves them beside the audio file. Existing `.lrc`/`.LRC` files are never overwritten
 
 **Multi-user**
 - Netflix-style "Who's listening?" profile picker — no passwords, LAN-trust model
@@ -111,8 +113,13 @@ connection and steps down when the network can't keep up:
 1. Edit `docker-compose.yml` — point the music volume at your library:
 
    ```yaml
+   environment:
+     - MUSIC_WRITE_DIR=/music-write
    volumes:
+     # Normal scanning/streaming access remains read-only.
      - /path/to/your/music:/music:ro
+     # Same library mounted separately for the optional generated .lrc writer.
+     - /path/to/your/music:/music-write:rw
      - ./data:/data
    ```
 
@@ -130,21 +137,34 @@ connection and steps down when the network can't keep up:
 
 ## Configuration
 
-| Env var                 | Default                                      | Purpose                                                                        |
-| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
-| `MUSIC_DIR`             | `/music`                                     | Folder scanned for audio files                                                 |
-| `DATA_DIR`              | `/data`                                      | SQLite DB, extracted album art, nightly backups                                |
-| `PORT`                  | `3000`                                       | HTTP port                                                                      |
-| `SPOTIFY_CLIENT_ID`     | _(none)_                                     | Optional; enables the Spotify taste/playlist import                            |
-| `SPOTIFY_REDIRECT_URI`  | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
-| `FFMPEG_PATH`           | `ffmpeg`                                     | Path to ffmpeg (bundled in the Docker image)                                   |
-| `LIDARR_WEBHOOK_SECRET` | _(none)_                                     | Optional; if set, the Lidarr webhook requires `?token=<secret>`                |
+| Env var                 | Default                                                                   | Purpose                                                                        |
+| ----------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `MUSIC_DIR`             | `/music`                                                                  | Read path scanned/streamed by Spotless                                         |
+| `MUSIC_WRITE_DIR`       | same as `MUSIC_DIR` outside Docker; `/music-write` in supplied Dockerfile | Optional write mirror used only to create generated `.lrc` sidecars            |
+| `DATA_DIR`              | `/data`                                                                   | SQLite DB, extracted album art, nightly backups                                |
+| `PORT`                  | `3000`                                                                    | HTTP port                                                                      |
+| `SPOTIFY_CLIENT_ID`     | _(none)_                                                                  | Optional; enables the Spotify taste/playlist import                            |
+| `SPOTIFY_REDIRECT_URI`  | `http://127.0.0.1:3000/api/spotify/callback`                              | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
+| `FFMPEG_PATH`           | `ffmpeg`                                                                  | Path to ffmpeg (bundled in the Docker image)                                   |
+| `LIDARR_WEBHOOK_SECRET` | _(none)_                                                                  | Optional; if set, the Lidarr webhook requires `?token=<secret>`                |
 
 Automatic library refresh is configured inside **Settings → Music library** and is stored
 in `DATA_DIR/library.db`; no environment variable is required. The default is **Off**.
 Spotless still performs its existing startup scan and manual/Lidarr-triggered scans when
 automatic refresh is disabled. Recurring intervals are measured from the completion of the
 latest scan, so scans do not overlap.
+
+Automatic synchronized sidecar download is also configured in **Settings → Music library** and
+is **Off by default**. When enabled, every successful startup/manual/automatic/Lidarr-triggered
+scan starts a background check for missing lyrics. Spotless talks directly to the LRCLIB API,
+requests only synchronized lyrics, throttles batch requests, honors rate-limit responses, and
+never overwrites an existing `.lrc` or `.LRC` file. LRCLIB misses/plain-only results are retried
+later rather than queried on every short scan interval.
+
+The supplied Docker configuration keeps the normal application library at `/music:ro` and mounts
+the same host folder a second time at `/music-write:rw`. Only the sidecar downloader maps track
+paths to that write mount. If your host permissions do not allow the container user to create
+files there, the Settings page will report a lyrics write error and your music files remain untouched.
 
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
@@ -175,6 +195,10 @@ file beside the audio file:
 If a local `.lrc` exists, it takes priority. Otherwise Spotless uses its cached lyrics and
 falls back to LRCLIB. Compatible apps such as **Amperfy** can therefore display synchronized
 lyrics directly from your local music library.
+
+If **Automatic synced lyrics sidecars** is enabled in Settings, Spotless also persists missing
+synchronized LRCLIB results as same-basename `.lrc` files after each successful library scan.
+Only `syncedLyrics` is written; plain-only results are not written as `.lrc`.
 
 Downloads/offline mode and bitrate/transcoding options are handled by the client app.
 
@@ -250,7 +274,7 @@ to the internet as-is.
 
 Other notes:
 
-- Your music folder is mounted read-only and never modified; all app state lives in `DATA_DIR`
+- Normal Spotless scanning/streaming access stays read-only at `/music`. If automatic synced sidecars are enabled, the optional `/music-write` mount allows Spotless to create new `.lrc` files only; existing lyric files are not overwritten
 - `DATA_DIR/library.db` holds generated mobile app passwords in the clear (inherent to the
   Subsonic protocol) — protect it at rest and don't expose the DB file
 - Nightly DB backups are kept in `DATA_DIR/backups` (last 7)

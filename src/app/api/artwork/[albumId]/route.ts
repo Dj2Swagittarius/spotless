@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { artDir } from '@/lib/db';
+import { imageContentType } from '@/lib/art';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,11 +39,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ albumId
   const file = path.join(artDir(), `${id}.img`);
   if (!Number.isInteger(id) || !fs.existsSync(file)) return placeholder(Number.isInteger(id) ? id : 0);
   const buf = fs.readFileSync(file);
-  // sniff jpeg/png
-  const isPng = buf.length > 4 && buf[0] === 0x89 && buf[1] === 0x50;
+  const contentType = imageContentType(buf);
+  if (!contentType) return placeholder(id);
   return new Response(new Uint8Array(buf), {
     headers: {
-      'Content-Type': isPng ? 'image/png' : 'image/jpeg',
+      'Content-Type': contentType,
       'Cache-Control': 'public, max-age=86400',
     },
   });

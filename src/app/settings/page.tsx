@@ -40,6 +40,24 @@ interface ScanStatus {
   nextAutoScanAt: string | null;
 }
 
+interface LyricsSidecarStatus {
+  enabled: boolean;
+  running: boolean;
+  lastRun: {
+    at: string;
+    total: number;
+    existing: number;
+    written: number;
+    cached: number;
+    noSyncedLyrics: number;
+    deferred: number;
+    errors: number;
+    stoppedByRateLimit: boolean;
+  } | null;
+  lastError: string | null;
+  writeRoot: string;
+}
+
 const AUTO_SCAN_OPTIONS = [
   { value: 0, label: 'Off' },
   { value: 5, label: 'Every 5 minutes' },
@@ -77,6 +95,13 @@ export default function SettingsPage() {
   const [nextAutoScanAt, setNextAutoScanAt] = useState<string | null>(null);
   const [scanScheduleBusy, setScanScheduleBusy] = useState(false);
   const [scanScheduleMsg, setScanScheduleMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // automatic synced .lrc sidecars
+  const [lyricsEnabled, setLyricsEnabled] = useState(false);
+  const [lyricsBusy, setLyricsBusy] = useState(false);
+  const [lyricsInfo, setLyricsInfo] = useState('');
+  const [lyricsError, setLyricsError] = useState('');
+  const [lyricsWriteRoot, setLyricsWriteRoot] = useState('');
 
   // spotify
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
@@ -140,6 +165,30 @@ export default function SettingsPage() {
       })
       .catch(() => {});
 
+
+  const loadLyrics = () =>
+    fetch('/api/settings/lyrics')
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return (await r.json()) as LyricsSidecarStatus;
+      })
+      .then((s) => {
+        if (!s) return;
+        setLyricsEnabled(s.enabled);
+        setLyricsBusy(s.running);
+        setLyricsWriteRoot(s.writeRoot ?? '');
+        setLyricsError(s.lastError ?? '');
+        if (s.running) {
+          setLyricsInfo('Downloading missing synchronized lyrics…');
+        } else if (s.lastRun) {
+          const rate = s.lastRun.stoppedByRateLimit ? ' — paused by LRCLIB rate limit' : '';
+          setLyricsInfo(
+            `Last lyrics run: wrote ${s.lastRun.written} .lrc, ${s.lastRun.existing} already existed, ${s.lastRun.noSyncedLyrics} had no synced lyrics, ${s.lastRun.deferred} waiting for retry${rate}`
+          );
+        }
+      })
+      .catch(() => {});
+
   useEffect(() => {
     fetch('/api/settings/music-dir').then((r) => r.json()).then((d) => setMusicDir(d.dir)).catch(() => {});
     fetch('/api/spotify/status').then((r) => r.json()).then(setSpotify).catch(() => {});
@@ -164,6 +213,7 @@ export default function SettingsPage() {
     fetch('/api/users/app-password').then((r) => r.json()).then((d) => d.username && setAppCred(d)).catch(() => {});
     loadScan();
     loadArt();
+    loadLyrics();
     try {
       setCrossfade(Number(localStorage.getItem('crossfade') ?? 0) || 0);
       setQuality(loadQuality());
@@ -174,7 +224,11 @@ export default function SettingsPage() {
 
     // Keep automatic scans, errors and the next scheduled run visible while
     // the Settings page stays open.
-    const scanPoll = setInterval(loadScan, 5000);
+    const scanPoll = setInterval(() => {
+      loadScan();
+      loadArt();
+      loadLyrics();
+    }, 5000);
     return () => clearInterval(scanPoll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -217,10 +271,21 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((s) => {
         setArtBusy(s.running);
-        if (s.lastRun)
+        if (s.running && s.progress) {
+          const phase =
+            s.progress.phase === 'albums-local'
+              ? 'checking local album art'
+              : s.progress.phase === 'albums-remote'
+                ? 'fetching album art'
+                : 'fetching artist art';
+          setArtInfo(`Artwork: ${phase} ${s.progress.done}/${s.progress.total}`);
+        } else if (s.lastError) {
+          setArtInfo(`Artwork error: ${s.lastError}`);
+        } else if (s.lastRun) {
           setArtInfo(
-            `Last run: fixed ${s.lastRun.albumsFixed} album + ${s.lastRun.artistsFixed} artist images, ${s.lastRun.albumsMissing} albums still without art`
+            `Last artwork run: fixed ${s.lastRun.albumsFixed} album + ${s.lastRun.artistsFixed} artist images, ${s.lastRun.albumsMissing} albums still without art, ${s.lastRun.errors ?? 0} errors`
           );
+        }
       })
       .catch(() => {});
 
@@ -277,6 +342,40 @@ export default function SettingsPage() {
           ? 'Automatic library refresh disabled.'
           : `Automatic library refresh set to ${AUTO_SCAN_OPTIONS.find((o) => o.value === minutes)?.label.toLowerCase() ?? `${minutes} minutes`}.`,
     });
+  };
+
+  const saveLyricsEnabled = async (enabled: boolean) => {
+    setLyricsError('');
+    const res = await fetch('/api/settings/lyrics', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setLyricsError(data.error || 'Could not save synchronized lyrics setting');
+      return;
+    }
+    setLyricsEnabled(Boolean(data.enabled));
+    setLyricsWriteRoot(data.writeRoot ?? lyricsWriteRoot);
+    if (enabled) {
+      setLyricsInfo('Enabled — every successful library scan will trigger a missing synced .lrc check.');
+    } else {
+      setLyricsInfo('Automatic synced .lrc download disabled. Existing lyric files are untouched.');
+    }
+  };
+
+  const fetchMissingLyrics = async () => {
+    setLyricsBusy(true);
+    setLyricsError('');
+    const res = await fetch('/api/settings/lyrics', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setLyricsBusy(false);
+      setLyricsError(data.error || 'Could not start synchronized lyrics download');
+      return;
+    }
+    setLyricsInfo(data.reason || 'Downloading missing synchronized lyrics…');
   };
 
   const saveLidarr = async () => {
@@ -537,6 +636,31 @@ export default function SettingsPage() {
             )}
           </div>
 
+          <div className="mb-4 rounded-lg bg-highlight/50 p-3">
+            <label className="flex items-center justify-between gap-4">
+              <span>
+                <span className="block text-sm font-medium">Automatic synced lyrics sidecars</span>
+                <span className="mt-1 block text-xs text-subdued">
+                  After every successful library scan, fetch only synchronized lyrics from LRCLIB and save missing
+                  same-name <code>.lrc</code> files beside the music. Existing lyric files are never overwritten.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={lyricsEnabled}
+                onChange={(e) => saveLyricsEnabled(e.target.checked)}
+                className="h-5 w-5 shrink-0 accent-green-500"
+              />
+            </label>
+            {lyricsWriteRoot && (
+              <p className="mt-2 text-xs text-subdued">
+                Lyrics write path: <span className="text-white">{lyricsWriteRoot}</span>
+              </p>
+            )}
+            {lyricsInfo && <p className="mt-2 text-xs text-subdued">{lyricsInfo}</p>}
+            {lyricsError && <p className="mt-2 text-xs text-red-400">Lyrics error: {lyricsError}</p>}
+          </div>
+
           <div className="mb-3 flex flex-wrap gap-2">
             <button className={btn} onClick={() => setPickerOpen(true)}>Change folder</button>
             <button className={btn} onClick={rescan} disabled={scanning}>
@@ -544,6 +668,9 @@ export default function SettingsPage() {
             </button>
             <button className={btn} onClick={fetchArt} disabled={artBusy}>
               {artBusy ? 'Fetching art…' : 'Fetch missing artwork'}
+            </button>
+            <button className={btn} onClick={fetchMissingLyrics} disabled={lyricsBusy}>
+              {lyricsBusy ? 'Fetching synced lyrics…' : 'Fetch missing synced lyrics'}
             </button>
           </div>
           {artInfo && <div className="text-sm text-subdued">{artInfo}</div>}

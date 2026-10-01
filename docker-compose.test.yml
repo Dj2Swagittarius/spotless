@@ -10,10 +10,12 @@ services:
 
     environment:
       MUSIC_DIR: /music
+      MUSIC_WRITE_DIR: /music-write
       DATA_DIR: /data
       PORT: 3000
       HOSTNAME: 0.0.0.0
 
     volumes:
       - ./test-env/music:/music:ro
+      - ./test-env/music:/music-write:rw
       - ./test-env/data:/data

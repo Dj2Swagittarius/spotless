@@ -427,6 +427,11 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
       const { fetchMissingArt } = await import('./art');
       fetchMissingArt().catch((err) => console.error('art fetch failed:', err));
     }
+
+    // Optional synced-LRC sidecar job. It is process-locked, never overwrites an
+    // existing .lrc/.LRC, and throttles its own LRCLIB requests.
+    const { triggerLyricsSidecarSync } = await import('./lyrics');
+    triggerLyricsSidecarSync();
   } catch (err) {
     runtime.lastScanError = {
       at: new Date().toISOString(),
