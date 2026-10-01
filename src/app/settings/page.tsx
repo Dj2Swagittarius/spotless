@@ -22,6 +22,14 @@ interface SpotifyStatus {
   importedAt: string | null;
   topCount: number;
   savedCount: number;
+  clientConfigured?: boolean;
+}
+
+interface SpotifyRedirectConfig {
+  customOrigin: string;
+  origin: string;
+  redirectUri: string;
+  source: 'setting' | 'environment' | 'default';
 }
 
 interface Dislike {
@@ -47,6 +55,11 @@ export default function SettingsPage() {
 
   // spotify
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
+  const [spotifyOrigin, setSpotifyOrigin] = useState('');
+  const [spotifyRedirectUri, setSpotifyRedirectUri] = useState('http://127.0.0.1:3000/api/spotify/callback');
+  const [spotifyRedirectSource, setSpotifyRedirectSource] = useState<SpotifyRedirectConfig['source']>('default');
+  const [spotifyRedirectMsg, setSpotifyRedirectMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [spotifyRedirectBusy, setSpotifyRedirectBusy] = useState(false);
 
   // last.fm
   const [lastfm, setLastfm] = useState<{ configured: boolean; connected: boolean; username: string | null } | null>(null);
@@ -100,6 +113,14 @@ export default function SettingsPage() {
   useEffect(() => {
     fetch('/api/settings/music-dir').then((r) => r.json()).then((d) => setMusicDir(d.dir)).catch(() => {});
     fetch('/api/spotify/status').then((r) => r.json()).then(setSpotify).catch(() => {});
+    fetch('/api/settings/spotify')
+      .then((r) => r.json())
+      .then((d: SpotifyRedirectConfig) => {
+        setSpotifyOrigin(d.customOrigin ?? '');
+        setSpotifyRedirectUri(d.redirectUri ?? 'http://127.0.0.1:3000/api/spotify/callback');
+        setSpotifyRedirectSource(d.source ?? 'default');
+      })
+      .catch(() => {});
     fetch('/api/lastfm/status').then((r) => r.json()).then(setLastfm).catch(() => {});
     fetch('/api/settings/lidarr')
       .then((r) => r.json())
@@ -231,6 +252,44 @@ export default function SettingsPage() {
     await fetch('/api/spotify/status', { method: 'DELETE' });
     const s = await fetch('/api/spotify/status').then((r) => r.json());
     setSpotify(s);
+  };
+
+  const applySpotifyRedirectConfig = (d: SpotifyRedirectConfig) => {
+    setSpotifyOrigin(d.customOrigin ?? '');
+    setSpotifyRedirectUri(d.redirectUri ?? 'http://127.0.0.1:3000/api/spotify/callback');
+    setSpotifyRedirectSource(d.source ?? 'default');
+  };
+
+  const saveSpotifyRedirect = async () => {
+    setSpotifyRedirectBusy(true);
+    setSpotifyRedirectMsg(null);
+    const res = await fetch('/api/settings/spotify', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin: spotifyOrigin }),
+    });
+    const data = await res.json();
+    setSpotifyRedirectBusy(false);
+    if (!res.ok) {
+      setSpotifyRedirectMsg({ ok: false, text: data.error || 'Could not save Spotify callback domain' });
+      return;
+    }
+    applySpotifyRedirectConfig(data);
+    setSpotifyRedirectMsg({ ok: true, text: 'Spotify callback setting saved.' });
+  };
+
+  const resetSpotifyRedirect = async () => {
+    setSpotifyRedirectBusy(true);
+    setSpotifyRedirectMsg(null);
+    const res = await fetch('/api/settings/spotify', { method: 'DELETE' });
+    const data = await res.json();
+    setSpotifyRedirectBusy(false);
+    if (!res.ok) {
+      setSpotifyRedirectMsg({ ok: false, text: data.error || 'Could not reset Spotify callback domain' });
+      return;
+    }
+    applySpotifyRedirectConfig(data);
+    setSpotifyRedirectMsg({ ok: true, text: 'Custom callback domain cleared.' });
   };
 
   const updateEq = (s: EqState) => {
@@ -549,6 +608,54 @@ export default function SettingsPage() {
               Connect Spotify
             </a>
           </>
+        )}
+
+        {me?.isAdmin && (
+          <div className="mt-5 border-t border-highlight pt-4">
+            <label className="mb-1 block text-sm font-medium">Public domain for Spotify OAuth</label>
+            <p className="mb-3 text-sm text-subdued">
+              Optional. For a reverse proxy, enter only your public domain, for example{' '}
+              <span className="text-white">music.example.com</span>. Spotless adds{' '}
+              <span className="text-white">/api/spotify/callback</span> automatically. Leave this blank to use{' '}
+              <span className="text-white">SPOTIFY_REDIRECT_URI</span> when set, otherwise the local loopback default.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                className={input}
+                value={spotifyOrigin}
+                onChange={(e) => setSpotifyOrigin(e.target.value)}
+                placeholder="music.example.com"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <button className={btn} onClick={saveSpotifyRedirect} disabled={spotifyRedirectBusy}>
+                {spotifyRedirectBusy ? 'Saving…' : 'Save'}
+              </button>
+              {spotifyRedirectSource === 'setting' && (
+                <button className={btn} onClick={resetSpotifyRedirect} disabled={spotifyRedirectBusy}>
+                  Use default
+                </button>
+              )}
+            </div>
+            <div className="mt-2 rounded bg-base px-3 py-2 text-xs text-subdued">
+              Spotify Redirect URI:{' '}
+              <span className="break-all font-mono text-white">{spotifyRedirectUri}</span>
+            </div>
+            <p className="mt-2 text-xs text-subdued">
+              Add that exact URI to your Spotify app's Redirect URIs before connecting. Public domains must use HTTPS.
+            </p>
+            {spotifyRedirectSource === 'environment' && !spotifyOrigin && (
+              <p className="mt-2 text-xs text-subdued">
+                Currently using the SPOTIFY_REDIRECT_URI environment variable. Saving a domain here overrides it.
+              </p>
+            )}
+            {spotifyRedirectMsg && (
+              <div className={`mt-3 rounded px-3 py-2 text-sm ${spotifyRedirectMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+                {spotifyRedirectMsg.text}
+              </div>
+            )}
+          </div>
         )}
       </Section>
 

@@ -307,10 +307,10 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
                 <>
                   <p className="text-sm text-subdued">
                     Imports your taste (top + saved artists) to seed Discover, and can rebuild your
-                    Spotify playlists from your local files. Heads up: Spotify only allows the
-                    connect flow from the machine running Spotless, browsed via{' '}
-                    <span className="text-white">http://127.0.0.1:3000</span> — it&apos;s often easier
-                    to do this later from Settings.
+                    Spotify playlists from your local files. The default callback uses{' '}
+                    <span className="text-white">http://127.0.0.1:3000</span>. If you run Spotless
+                    behind a reverse proxy, finish setup first and set your HTTPS public domain under
+                    Settings → Spotify before connecting.
                   </p>
                   <a href="/api/spotify/login" className="btn-primary inline-block">
                     Connect Spotify

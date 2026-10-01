@@ -113,14 +113,15 @@ connection and steps down when the network can't keep up:
 
 ## Configuration
 
-| Env var             | Default  | Purpose                                              |
-| ------------------- | -------- | ---------------------------------------------------- |
-| `MUSIC_DIR`         | `/music` | Folder scanned for audio files                       |
-| `DATA_DIR`          | `/data`  | SQLite DB, extracted album art, nightly backups      |
-| `PORT`              | `3000`   | HTTP port                                            |
-| `SPOTIFY_CLIENT_ID` | _(none)_ | Optional; enables the Spotify taste/playlist import  |
-| `FFMPEG_PATH`       | `ffmpeg` | Path to ffmpeg (bundled in the Docker image)         |
-| `LIDARR_WEBHOOK_SECRET` | _(none)_ | Optional; if set, the Lidarr webhook requires `?token=<secret>` |
+| Env var                | Default                                      | Purpose                                                                        |
+| ---------------------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `MUSIC_DIR`            | `/music`                                     | Folder scanned for audio files                                                 |
+| `DATA_DIR`             | `/data`                                      | SQLite DB, extracted album art, nightly backups                                |
+| `PORT`                 | `3000`                                       | HTTP port                                                                      |
+| `SPOTIFY_CLIENT_ID`    | _(none)_                                     | Optional; enables the Spotify taste/playlist import                            |
+| `SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
+| `FFMPEG_PATH`          | `ffmpeg`                                     | Path to ffmpeg (bundled in the Docker image)                                   |
+| `LIDARR_WEBHOOK_SECRET`| _(none)_                                     | Optional; if set, the Lidarr webhook requires `?token=<secret>`                |
 
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
@@ -137,13 +138,23 @@ bitrate/transcoding options are handled by the app.
 
 ### Spotify setup (optional)
 
-1. Create an app at <https://developer.spotify.com/dashboard>
-2. Add `http://127.0.0.1:3000/api/spotify/callback` as a redirect URI
-3. Set `SPOTIFY_CLIENT_ID` to the app's client ID (no secret needed — PKCE flow)
-4. The connect flow must be opened from the machine running Spotless via
-   `http://127.0.0.1:3000` (a Spotify platform restriction on loopback redirect URIs),
-   and each profile that connects must be added under User Management in your
-   Spotify app dashboard while the app is in development mode.
+1. Create an app at <https://developer.spotify.com/dashboard>.
+2. Set `SPOTIFY_CLIENT_ID` to the app's client ID (no secret needed — Spotless uses PKCE).
+3. Choose the callback you will use:
+   - Local/default: `http://127.0.0.1:3000/api/spotify/callback`
+   - Reverse proxy: open **Settings → Spotify** as the admin and enter your public domain,
+     for example `music.example.com`. Spotless will use
+     `https://music.example.com/api/spotify/callback`.
+   - Alternatively set the deployment-level `SPOTIFY_REDIRECT_URI` environment variable to
+     the full callback URI. A value saved in Settings takes precedence over the environment variable.
+4. Add the **exact** callback URI shown in Settings to your Spotify app's Redirect URIs.
+   Spotify requires HTTPS for non-loopback web redirects; plain HTTP is allowed only for loopback IP
+   literals such as `127.0.0.1`, and `localhost` is not accepted.
+5. Click **Connect Spotify**. If a public callback domain is configured and you opened Spotless through
+   a LAN/IP address, Spotless redirects the browser to the configured public origin before starting
+   OAuth so the PKCE cookie and callback use the same origin.
+6. While the Spotify app is in development mode, add each Spotify account that will connect under
+   User Management in the Spotify developer dashboard.
 
 ### Last.fm setup (optional)
 

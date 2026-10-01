@@ -8,6 +8,8 @@ services:
     # environment:
     #   # optional — enables the Spotify taste/playlist import (see README)
     #   - SPOTIFY_CLIENT_ID=your_spotify_app_client_id
+    #   # optional deployment default for reverse-proxy OAuth; Settings → Spotify can override it
+    #   - SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
     volumes:
       # left side: your music folder on the host (read-only; never modified)
       - /path/to/your/music:/music:ro
