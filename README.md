@@ -1,4 +1,4 @@
-# Spotless v1.1
+# Spotless V1.1
 
 Fork of [spotless](https://github.com/Dj2Swagittarius/spotless).
 
@@ -15,96 +15,87 @@ Point it at a folder of music and it gives you a dark-themed player with profile
 ![Home](docs/home.png)
 
 | Discover — suggestions, new releases, collection gaps | Artist pages |
-
 | --- | --- |
-
 | ![Discover](docs/discover.png) | ![Artist](docs/artist.png) |
 
 | Trending charts | Listening stats |
-
 | --- | --- |
-
 | ![Trending](docs/trending.png) | ![Stats](docs/stats.png) |
 
 Per-device streaming quality — original files, a fixed MP3 tier, or **Auto**, which follows your
-
 connection and steps down when the network can't keep up:
 
 ![Streaming quality](docs/settings-playback.png)
 
 <p align="center">
-
   <img src="docs/mobile-home.png" width="32%" alt="Mobile home" />
-
   &nbsp;
-
   <img src="docs/mobile-nowplaying.png" width="32%" alt="Mobile now playing" />
-
 </p>
 
 ## Features
 
 **Player**
 
-\- Gapless playback and configurable crossfade (0–12s), dual-audio-element engine
+- Gapless playback and configurable crossfade (0–12s), dual-audio-element engine
 
-\- Adaptive streaming quality (Auto): full quality on Wi-Fi, a lighter stream on mobile data,
+- Adaptive streaming quality (Auto): full quality on Wi-Fi, a lighter stream on mobile data,
 
   and a step down the moment playback starts to stutter — the song resumes from where it was,
 
   not from the top. Recovers a stream that dies mid-song instead of leaving it stalled
 
-\- Radio mode: any song seeds an endless queue of similar tracks from your own library
+- Radio mode: any song seeds an endless queue of similar tracks from your own library
 
-\- Queue with drag-to-reorder, shuffle, repeat (off/all/one), sleep timer
+- Queue with drag-to-reorder, shuffle, repeat (off/all/one), sleep timer
 
-\- ReplayGain volume normalization (read from tags)
+- ReplayGain volume normalization (read from tags)
 
-\- 10-band graphic equalizer (31 Hz – 16 kHz, ±12 dB) with 13 presets or your own curve;
+- 10-band graphic equalizer (31 Hz – 16 kHz, ±12 dB) with 13 presets or your own curve;
 
   per device, and switching it off is an exact bypass
 
-\- Internet radio: add any Icecast/Shoutcast stream by URL under **Radio** in the sidebar and it
+- Internet radio: add any Icecast/Shoutcast stream by URL under ****Radio**** in the sidebar and it
 
   plays through the same player (stations are exposed to Subsonic apps too)
 
-\- Synced lyrics with **local sidecar `.lrc` files taking priority**, followed by cached/LRCLIB
+- Synced lyrics with ****local sidecar `.lrc` files taking priority****, followed by cached/LRCLIB
 
   fallback when no matching local lyrics file is available
 
-\- Media Session API: lock-screen / media-key controls
+- Media Session API: lock-screen / media-key controls
 
-\- Full-screen mobile now-playing, mini-player, responsive layout, installable PWA manifest
+- Full-screen mobile now-playing, mini-player, responsive layout, installable PWA manifest
 
 **Library**
 
-\- Scans MP3, FLAC, M4A, AAC, OGG, OPUS, WAV; extracts tags + embedded album art
+- Scans MP3, FLAC, M4A, AAC, OGG, OPUS, WAV; extracts tags + embedded album art
 
-\- Smart artist matching: feature credits ("A feat. B"), case, diacritics (Tiësto = Tiesto) and
+- Smart artist matching: feature credits ("A feat. B"), case, diacritics (Tiësto = Tiesto) and
 
   punctuation variants fold into one artist; self-healing dedupe runs on every scan
 
-\- Home feed: recently played, top tracks, artist/genre/decade mixes, forgotten favorites, recently added
+- Home feed: recently played, top tracks, artist/genre/decade mixes, forgotten favorites, recently added
 
-\- Search: fuzzy local search plus "not in your library" results from Deezer with 30-second previews
+- Search: fuzzy local search plus "not in your library" results from Deezer with 30-second previews
 
-\- Playlists with drag-reorder and mosaic covers; liked songs; listening stats (tops, activity, periods)
+- Playlists with drag-reorder and mosaic covers; liked songs; listening stats (tops, activity, periods)
 
-\- Duplicate-file report (same song stored twice, e.g. MP3 + FLAC)
+- Duplicate-file report (same song stored twice, e.g. MP3 + FLAC)
 
-\- Album/artist artwork repair: local `cover`/`folder`/`front` images first, then conservative exact-match Deezer backfill; nightly database backups
+- Album/artist artwork repair: local `cover`/`folder`/`front` images first, then conservative exact-match Deezer backfill; nightly database backups
 
-\- Optional automatic library refresh from **Settings → Music library**: Off by default, or
+- Optional automatic library refresh from ****Settings → Music library****: Off by default, or
 
   every 5 / 15 / 30 minutes, 1 / 3 / 6 / 12 / 24 hours. Scans never overlap, unchanged
 
   files are skipped using their modification time, and a manual rescan resets the next timer
 
-\- Same-basename local `.lrc` sidecar support — for example `Song.flac` + `Song.lrc`.
+- Same-basename local `.lrc` sidecar support — for example `Song.flac` + `Song.lrc`.
 
   Spotless reads local sidecars first; if none exists, playback/API lyrics fall back to the SQLite cache and LRCLIB
 
-\- Optional **automatic synced `.lrc` download** from **Settings → Music library**. After every successful
+- Optional **automatic synced `.lrc` download** from **Settings → Music library**. After every successful
 
   library scan, Spotless checks tracks missing a sidecar, requests **synchronized lyrics only** from LRCLIB,
 
@@ -113,53 +104,60 @@ connection and steps down when the network can't keep up:
 **Multi-user**
 
 - Netflix-style "Who's listening?" profile picker with per-profile web authentication
+
 - Each profile signs in with its own password; passwords are never stored in plaintext
+
 - Opaque server-side sessions use an `HttpOnly`, `SameSite=Lax` cookie instead of trusting a profile ID from the browser
+
 - Per-profile likes, history, playlists, stats, discovery taste, and hidden artists
+
 - The first profile is the admin: server settings (music folder, scans, Lidarr) are hidden from and blocked (HTTP 403) for everyone else
+
 - Admin-only profile management is available from **Manage profiles** (`/users`): create profiles, set/reset passwords, and revoke a user's existing web sessions
+
 - Regular users can change only their own password and must provide their current password
+
 - Existing passwordless installations have a one-time migration path: profile 1 can claim the first admin password only while no web password exists anywhere in the database
 
 **Discovery** (no API keys needed — Deezer + Apple RSS public endpoints)
 
-\- Per-profile artist suggestions based on listening history, with "not interested" dismissals
+- Per-profile artist suggestions based on listening history, with "not interested" dismissals
 
-\- New releases from artists you already have
+- New releases from artists you already have
 
-\- "Complete your collection": studio albums you're missing, repackage/remix noise filtered out
+- "Complete your collection": studio albums you're missing, repackage/remix noise filtered out
 
-\- Trending: country charts with region picker, genre rows, "trending for you" genre blend
+- Trending: country charts with region picker, genre rows, "trending for you" genre blend
 
 **Mobile apps (Subsonic / OpenSubsonic API)**
 
-\- Spotless implements the Subsonic API, so mature native apps work out of the box:
+- Spotless implements the Subsonic API, so mature native apps work out of the box:
 
   **Amperfy (iOS)**, **Symfonium**, **DSub**, **Substreamer**, **play:Sub** and friends — with
 
   the offline download/sync those apps provide
 
-\- Lyrics API support includes both the legacy Subsonic **`getLyrics`** endpoint for plain-text
+- Lyrics API support includes both the legacy Subsonic **`getLyrics`** endpoint for plain-text
 
   lyrics and OpenSubsonic **`getLyricsBySongId`** via the **`songLyrics` v1** extension for
 
-  structured synchronized lyrics
+  structured synchronised lyrics
 
-\- Compatible clients such as **Amperfy** can receive synced lyrics automatically through the
+- Compatible clients such as **Amperfy** can receive synced lyrics automatically through the
 
   Subsonic/OpenSubsonic API; local same-basename `.lrc` files are preferred over LRCLIB results
 
-\- On-the-fly **transcoding** via ffmpeg (mp3/ogg/opus/aac, client-requested bitrate) for
+- On-the-fly **transcoding** via ffmpeg (mp3/ogg/opus/aac, client-requested bitrate) for
 
   streaming big FLAC libraries over mobile data
 
-\- Each profile gets its own generated app password (Settings → Mobile apps); stars,
+- Each profile gets its own generated app password (Settings → Mobile apps); stars,
 
   scrobbles and playlists from the app land on the right profile
 
 **Integrations** (optional)
 
-\- **Lidarr**: one-click add + search for a whole artist or one specific album; live download
+- **Lidarr**: one-click add + search for a whole artist or one specific album; live download
 
   queue widget; webhook triggers a library rescan when imports finish.
 
@@ -167,7 +165,7 @@ connection and steps down when the network can't keep up:
 
   approves or denies them from a queue on the Discover page.
 
-\- **Spotify**: per-profile PKCE connect imports your taste (top + saved artists) to seed
+- **Spotify**: per-profile PKCE connect imports your taste (top + saved artists) to seed
 
   discovery, and can rebuild your Spotify playlists from matching local files. Requires
 
@@ -175,11 +173,11 @@ connection and steps down when the network can't keep up:
 
   The OAuth callback supports both the default loopback URL and a configurable HTTPS
 
-  reverse-proxy domain through **Settings → Spotify** or the `SPOTIFY_REDIRECT_URI`
+  reverse-proxy domain through ****Settings → Spotify**** or the `SPOTIFY_REDIRECT_URI`
 
   environment variable
 
-\- **Last.fm**: the admin pastes a Last.fm API key + shared secret once (Settings → Last.fm),
+- **Last.fm**: the admin pastes a Last.fm API key + shared secret once (Settings → Last.fm),
 
   then each profile connects its own account. Every play from the web player and from
 
@@ -189,37 +187,37 @@ connection and steps down when the network can't keep up:
 
 1. Edit `docker-compose.yml` — point the music volume at your library:
 
-   ```yaml
+```yaml
 
-   environment:
+environment:
 
-     - MUSIC_WRITE_DIR=/music-write
+ - MUSIC_WRITE_DIR=/music-write
 
-   volumes:
+volumes:
 
-     # Normal scanning/streaming access remains read-only.
+ # Normal scanning/streaming access remains read-only.
 
-     - /path/to/your/music:/music:ro
+ - /path/to/your/music:/music:ro
 
-     # Same library mounted separately for the optional generated .lrc writer.
+ # Same library mounted separately for the optional generated .lrc writer.
 
-     - /path/to/your/music:/music-write:rw
+ - /path/to/your/music:/music-write:rw
 
-     - ./data:/data
+ - ./data:/data
 
-   ```
+```
 
 2. Build and run:
 
-   ```bash
+```bash
 
-   docker compose up -d --build
+docker compose up -d --build
 
-   ```
+```
 
 3. Open `http://<server-ip>:3000` — a setup wizard walks you through creating the first profile
 
-   (which becomes the admin) **and its web password**, scanning your library, and the optional
+   (which becomes the admin) ****and its web password****, scanning your library, and the optional
 
    Lidarr and Spotify hookups. Every step is skippable except establishing the initial admin
 
@@ -229,64 +227,40 @@ connection and steps down when the network can't keep up:
 
 ## Configuration
 
-| Env var                 | Default                                                                   | Purpose                                                                        |
-
-| ----------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-
-| `MUSIC_DIR`             | `/music`                                                                  | Read path scanned/streamed by Spotless                                         |
-
-| `MUSIC_WRITE_DIR`       | same as `MUSIC_DIR` outside Docker; `/music-write` in supplied Dockerfile | Optional write mirror used only to create generated `.lrc` sidecars            |
-
-| `DATA_DIR`              | `/data`                                                                   | SQLite DB, extracted album art, nightly backups                                |
-
-| `PORT`                  | `3000`                                                                    | HTTP port                                                                      |
-
-| `SPOTIFY_CLIENT_ID`     | *_(none)_*                                                                | Optional; enables the Spotify taste/playlist import                            |
-
-| `SPOTIFY_REDIRECT_URI`  | `http://127.0.0.1:3000/api/spotify/callback`                              | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
-
-| `FFMPEG_PATH`           | `ffmpeg`                                                                  | Path to ffmpeg (bundled in the Docker image)                                   |
-
-| `LIDARR_WEBHOOK_SECRET` | *_(none)_*                                                                | Optional; if set, the Lidarr webhook requires `?token=<secret>`                |
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `MUSIC_DIR` | `/music` | Read path scanned/streamed by Spotless |
+| `MUSIC_WRITE_DIR` | same as `MUSIC_DIR` outside Docker; `/music-write` in supplied Dockerfile | Optional write mirror used only to create generated `.lrc` sidecars |
+| `DATA_DIR` | `/data` | SQLite DB, extracted album art, nightly backups |
+| `PORT` | `3000` | HTTP port |
+| `SPOTIFY_CLIENT_ID` | *(none)* | Optional; enables the Spotify taste/playlist import |
+| `SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
+| `FFMPEG_PATH` | `ffmpeg` | Path to ffmpeg (bundled in the Docker image) |
+| `LIDARR_WEBHOOK_SECRET` | *(none)* | Optional; if set, the Lidarr webhook requires `?token=<secret>` |
+| `AUTH_SECURE_COOKIE` | *(auto)* | Force the web session cookie to `Secure`; use `true` behind HTTPS if proxy detection is unavailable |
 
 Automatic library refresh is configured inside **Settings → Music library** and is stored
-
 in `DATA_DIR/library.db`; no environment variable is required. The default is **Off**.
-
 Spotless still performs its existing startup scan and manual/Lidarr-triggered scans when
-
 automatic refresh is disabled. Recurring intervals are measured from the completion of the
-
 latest scan, so scans do not overlap.
 
 Automatic synchronized sidecar download is also configured in **Settings → Music library** and
-
 is **Off by default**. When enabled, every successful startup/manual/automatic/Lidarr-triggered
-
 scan starts a background check for missing lyrics. Spotless talks directly to the LRCLIB API,
-
 requests only synchronized lyrics, throttles batch requests, honors rate-limit responses, and
-
 never overwrites an existing `.lrc` or `.LRC` file. LRCLIB misses/plain-only results are retried
-
 later rather than queried on every short scan interval.
 
 The supplied Docker configuration keeps the normal application library at `/music:ro` and mounts
-
 the same host folder a second time at `/music-write:rw`. Only the sidecar downloader maps track
-
 paths to that write mount. If your host permissions do not allow the container user to create
-
 files there, the Settings page will report a lyrics write error and your music files remain untouched.
 
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
-
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
-
 Webhook pointing at `http://<spotless-host>:3000/api/lidarr/webhook`. If you set
-
 `LIDARR_WEBHOOK_SECRET`, append `?token=<secret>` to that URL — otherwise the webhook is
-
 unauthenticated. Keep that endpoint restricted to a trusted network or set a webhook secret.
 
 ### Web authentication and profile management
@@ -294,47 +268,66 @@ unauthenticated. Keep that endpoint restricted to a trusted network or set a web
 Spotless uses normal username/profile + password authentication for the web UI.
 
 - The browser receives only an opaque random session cookie named `spotless_session`.
+
 - The session cookie is `HttpOnly` and `SameSite=Lax`; it is also marked `Secure` when Spotless detects HTTPS.
+
 - Authentication state is validated server-side against SQLite. The old plain `uid` cookie is not trusted as authentication.
+
 - Web passwords are hashed with Node's memory-hard `scrypt`; plaintext web passwords are never stored.
+
 - Login attempts are progressively rate-limited after repeated failures.
+
 - Mutating `/api/*` requests are protected by same-origin checks in addition to the SameSite cookie policy.
+
 - Password changes/resets revoke the affected user's existing web sessions.
+
 - The Lidarr webhook and Subsonic/OpenSubsonic `/rest/*` authentication remain separate from browser-session authentication.
 
 #### Creating and managing users
 
 The first profile is the administrator.
 
-Open the profile menu and choose **Manage profiles**, or go directly to:
+Open the profile menu and choose ****Manage profiles****, or go directly to:
 
 ```text
+
 /users
+
 ```
 
 The admin can:
 
 - create new profiles and assign their initial passwords
+
 - set or reset passwords for existing profiles
+
 - revoke a user's existing browser sessions by resetting that user's password
 
 Non-admin profiles can change only their own password, and must enter their current password.
+
 
 #### Upgrading an existing passwordless installation
 
 Back up the database before upgrading:
 
 ```bash
+
 cp ./data/library.db ./data/library.db.pre-auth-backup
+
 ```
 
 After rebuilding and starting the new version:
 
 1. Open Spotless normally.
+
 2. Select profile 1 (the existing admin).
-3. If the database contains existing profiles but **no web password has ever been configured**, Spotless offers a one-time **Create admin password** flow.
+
+3. If the database contains existing profiles but ****no web password has ever been configured****, Spotless offers a one-time ****Create admin password**** flow.
+
 4. Create an admin password of at least 15 characters.
-5. Sign in and open **Manage profiles**.
+
+5. Sign in and open ****Manage profiles****.
+
 6. Assign passwords to the other existing profiles.
 
 Existing non-admin profiles remain locked until the admin assigns them a web password.
@@ -345,23 +338,28 @@ Do this migration while the old passwordless installation is still restricted to
 
 #### HTTPS and secure cookies
 
-Authentication protects the application account boundary, but it does **not** replace transport encryption.
+Authentication protects the application account boundary, but it does ****not**** replace transport encryption.
 
 For remote access, use HTTPS through a reverse proxy or use a private network/VPN such as Tailscale or WireGuard. Do not expose plain HTTP directly to the public Internet.
 
 If Spotless is behind an HTTPS reverse proxy, make sure the proxy forwards the original host/protocol, including:
 
 ```text
+
 X-Forwarded-Proto: https
+
 ```
 
-Spotless will then use a `Secure` session cookie automatically.
+Spotless will then automatically use a `Secure` session cookie.
 
 If your proxy setup prevents protocol detection, you can force secure cookies:
 
 ```yaml
+
 environment:
+
   - AUTH_SECURE_COOKIE=true
+
 ```
 
 Do **not** force `AUTH_SECURE_COOKIE=true` when accessing Spotless directly over plain HTTP, because browsers will not send a Secure cookie over HTTP.
@@ -376,9 +374,9 @@ DSub, Substreamer, play:Sub or any other compatible client.
 
 Spotless supports both:
 
-\- Legacy Subsonic **`getLyrics`** for plain-text lyrics
+- Legacy Subsonic **`getLyrics`** for plain-text lyrics
 
-\- OpenSubsonic **`getLyricsBySongId`** through **`songLyrics` v1** for synchronized,
+- OpenSubsonic **`getLyricsBySongId`***through **`songLyrics` v1** for synchronized,
 
   timestamped lyrics
 
@@ -408,6 +406,7 @@ Only `syncedLyrics` is written; plain-only results are not written as `.lrc`.
 
 Downloads/offline mode and bitrate/transcoding options are handled by the client app.
 
+
 ### Spotify setup (optional)
 
 1. Create an app at <https://developer.spotify.com/dashboard>.
@@ -416,51 +415,51 @@ Downloads/offline mode and bitrate/transcoding options are handled by the client
 
 3. Choose the callback you will use:
 
-   - **Local/default:** `http://127.0.0.1:3000/api/spotify/callback`
-
-   - **Reverse proxy:** open **Settings → Spotify** as the admin and enter your public domain,
-
-     for example:
-
-     ```text
-
-     music.example.com
-
-     ```
-
-     Spotless will automatically use:
-
-     ```text
-
-     https://music.example.com/api/spotify/callback
-
-     ```
-
-   - Alternatively, set the deployment-level `SPOTIFY_REDIRECT_URI` environment variable to
-
-     the complete callback URI:
-
-     ```text
-
-     SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
-
-     ```
-
-   - A domain saved in **Settings → Spotify** takes precedence over
-
-     `SPOTIFY_REDIRECT_URI`. If neither is configured, Spotless falls back to
-
-     `http://127.0.0.1:3000/api/spotify/callback`.
+  - **Local/default:** `http://127.0.0.1:3000/api/spotify/callback`
+  
+  - **Reverse proxy:** open **Settings → Spotify** as the admin and enter your public domain,
+  
+       for example:
+  
+  ```text
+  
+   music.example.com
+  
+  ```
+  
+       Spotless will automatically use:
+  
+  ```text
+  
+   https://music.example.com/api/spotify/callback
+  
+  ```
+  
+  - Alternatively, set the deployment-level `SPOTIFY_REDIRECT_URI` environment variable to
+  
+       the complete callback URI:
+  
+  ```text
+  
+   SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
+  
+  ```
+  
+  - A domain saved in **Settings → Spotify** takes precedence over
+  
+       `SPOTIFY_REDIRECT_URI`. If neither is configured, Spotless falls back to
+  
+       `http://127.0.0.1:3000/api/spotify/callback`.
 
 4. Add the **exact** callback URI shown in Settings to your Spotify app's Redirect URIs.
 
    For example:
 
-   ```text
+```text
 
-   https://music.example.com/api/spotify/callback
+https://music.example.com/api/spotify/callback
 
-   ```
+```
 
    Spotify requires HTTPS for non-loopback web redirects. Plain HTTP is supported for
 
@@ -476,6 +475,7 @@ Downloads/offline mode and bitrate/transcoding options are handled by the client
 
    under User Management in the Spotify developer dashboard.
 
+
 ### Last.fm setup (optional)
 
 1. Create a free API account at <https://www.last.fm/api/account/create> (any name, callback URL can stay blank)
@@ -483,6 +483,7 @@ Downloads/offline mode and bitrate/transcoding options are handled by the client
 2. As the admin profile, paste the API key and shared secret into **Settings → Last.fm** and hit **Test & save**
 
 3. Each profile then clicks **Connect Last.fm** on the same page to link its own account
+
 
 ## Local development
 
@@ -500,16 +501,24 @@ npm run dev
 
 Spotless now has web authentication, but secure deployment still matters.
 
-**Web UI authentication**
+**Web UI authentication***
 
 - Every web profile has its own password.
+
 - Web passwords are stored only as memory-hard `scrypt` hashes.
+
 - Browser authentication uses an opaque server-side session cookie; the browser does not authenticate by supplying a profile ID.
+
 - Session cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` on HTTPS.
+
 - Protected `/api/*` endpoints require a valid server-side session.
+
 - Cross-site state-changing API requests are rejected.
+
 - Repeated failed logins are progressively rate-limited.
+
 - Password resets revoke the affected profile's active web sessions.
+
 - Profile 1 is the admin; admin-only API operations are still checked server-side.
 
 **Network security**
@@ -521,11 +530,17 @@ Do not publicly expose Spotless over plain HTTP.
 **Database and protocol notes**
 
 - `DATA_DIR/library.db` contains authentication/session state and other private application data. Protect the database file, its backups, and the host filesystem from unauthorized access.
+
 - Web password hashes are not plaintext passwords, and stored web-session values are not the raw browser session tokens.
+
 - The Subsonic/OpenSubsonic mobile-app authentication mechanism is separate from web authentication. Generated mobile app passwords must remain usable by compatible clients, so continue to treat `library.db` as sensitive data.
+
 - `/api/lidarr/webhook` remains callable by Lidarr without a browser session. If it is reachable outside a trusted network, configure `LIDARR_WEBHOOK_SECRET`.
+
 - Nightly DB backups are kept in `DATA_DIR/backups` (last 7); protect those backups with the same care as the live database.
+
 - Normal Spotless scanning/streaming access stays read-only at `/music`. If automatic synced sidecars are enabled, the optional `/music-write` mount allows Spotless to create new `.lrc` files only; existing lyric files are not overwritten.
+
 - FLAC/OGG/OPUS playback depends on browser codec support (fine in Chromium/Firefox; Safari lacks OGG/OPUS).
 
 **Password guidance**
