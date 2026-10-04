@@ -13,6 +13,8 @@ interface Props {
   tracks: Track[];
   showAlbum?: boolean;
   showArt?: boolean;
+  /** Off on an artist's own page, where linking back to it would just reload the page. */
+  linkArtist?: boolean;
   onRemove?: (trackId: number) => void;
   /** Placeholder rows (songs not in the library) get an X that calls this with the placeholder id. */
   onRemovePlaceholder?: (placeholderId: number) => void;
@@ -44,7 +46,15 @@ function GetButton({ artist, album }: { artist: string; album: string }) {
   );
 }
 
-export default function TrackList({ tracks, showAlbum = true, showArt = true, onRemove, onRemovePlaceholder, onReorder }: Props) {
+export default function TrackList({
+  tracks,
+  showAlbum = true,
+  showArt = true,
+  linkArtist = true,
+  onRemove,
+  onRemovePlaceholder,
+  onReorder,
+}: Props) {
   const { playQueue, queue, index, isPlaying } = usePlayer();
   const likes = useLikes();
   const currentId = index >= 0 ? queue[index]?.id : null;
@@ -57,6 +67,11 @@ export default function TrackList({ tracks, showAlbum = true, showArt = true, on
     const t = tracks[i];
     if (t.missing) return;
     playQueue(playable, playable.indexOf(t));
+  };
+  // a single click anywhere on the row plays it; links and buttons inside the row keep their own action
+  const onRowClick = (e: React.MouseEvent, i: number) => {
+    if ((e.target as HTMLElement).closest('a, button')) return;
+    play(i);
   };
 
   const rowClass = `group grid grid-cols-[2rem_1fr_auto] items-center gap-3 rounded px-2 py-1.5 hover:bg-white/10 sm:grid-cols-[2rem_4fr_3fr_auto] ${
@@ -121,7 +136,7 @@ export default function TrackList({ tracks, showAlbum = true, showArt = true, on
 
         const isCurrent = t.id === currentId;
         return (
-          <div key={`${t.id}-${i}`} className={rowClass} onDoubleClick={() => play(i)} {...dragProps(i)}>
+          <div key={`${t.id}-${i}`} className={rowClass} onClick={(e) => onRowClick(e, i)} {...dragProps(i)}>
             <button
               onClick={() => play(i)}
               className="relative flex h-8 w-8 items-center justify-center text-sm text-subdued"
@@ -142,12 +157,16 @@ export default function TrackList({ tracks, showAlbum = true, showArt = true, on
               )}
               <div className="min-w-0">
                 <div className={`truncate font-medium ${isCurrent ? 'text-accent' : ''}`}>{t.title}</div>
-                <Link
-                  href={`/artist/${t.artistId}`}
-                  className="block truncate text-sm text-subdued hover:text-white hover:underline"
-                >
-                  {t.artist}
-                </Link>
+                {linkArtist ? (
+                  <Link
+                    href={`/artist/${t.artistId}`}
+                    className="block truncate text-sm text-subdued hover:text-white hover:underline"
+                  >
+                    {t.artist}
+                  </Link>
+                ) : (
+                  <div className="truncate text-sm text-subdued">{t.artist}</div>
+                )}
               </div>
             </div>
             {showAlbum ? (
