@@ -81,7 +81,7 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
 
       <section>
         <h2 className="mb-3 text-2xl font-bold">Popular</h2>
-        <TrackList tracks={artist.topTracks} />
+        <TrackList tracks={artist.topTracks} linkArtist={false} />
       </section>
 
       <section>
