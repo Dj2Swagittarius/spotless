@@ -259,13 +259,23 @@ export function dedupeLibrary(db: ReturnType<typeof getDb>): void {
   tx();
 }
 
-function walk(dir: string, out: string[] = []): string[] {
-  // Deliberately let read errors abort the scan. Returning a partial/empty list
-  // would make the removal phase interpret temporarily-unreadable files as deleted.
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+/**
+ * Collect audio files. The root must be readable (the caller checks); a subfolder that
+ * can't be read is skipped and recorded in `unreadable`, so the removal phase keeps its
+ * tracks instead of treating a permissions hiccup as deleted files.
+ */
+function walk(dir: string, out: string[] = [], unreadable: string[] = []): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    console.warn(`scan: cannot read ${dir}, keeping its tracks:`, err);
+    unreadable.push(dir + path.sep);
+    return out;
+  }
   for (const e of entries) {
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) walk(full, out);
+    if (e.isDirectory()) walk(full, out, unreadable);
     else if (EXTS.has(path.extname(e.name).toLowerCase())) out.push(full);
   }
   return out;
@@ -291,7 +301,8 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
     if (!rootStat.isDirectory()) throw new Error(`Music directory is not a directory: ${musicDir}`);
     fs.accessSync(musicDir, fs.constants.R_OK);
 
-    const files = walk(musicDir);
+    const unreadable: string[] = [];
+    const files = walk(musicDir, [], unreadable);
     const fileSet = new Set(files);
 
     // remove tracks whose files vanished
@@ -308,7 +319,7 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
     let removed = 0;
     const delTrack = db.prepare('DELETE FROM tracks WHERE id = ?');
     for (const row of existing) {
-      if (!fileSet.has(row.path)) {
+      if (!fileSet.has(row.path) && !unreadable.some((d) => row.path.startsWith(d))) {
         delTrack.run(row.id);
         removed++;
       }

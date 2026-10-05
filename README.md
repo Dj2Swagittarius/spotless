@@ -1,4 +1,4 @@
-# Spotless V1.1
+# Spotless
 
 Fork of [spotless](https://github.com/Dj2Swagittarius/spotless).
 
@@ -55,11 +55,11 @@ connection and steps down when the network can't keep up:
 
   per device, and switching it off is an exact bypass
 
-- Internet radio: add any Icecast/Shoutcast stream by URL under ****Radio**** in the sidebar and it
+- Internet radio: add any Icecast/Shoutcast stream by URL under **Radio** in the sidebar and it
 
   plays through the same player (stations are exposed to Subsonic apps too)
 
-- Synced lyrics with ****local sidecar `.lrc` files taking priority****, followed by cached/LRCLIB
+- Synced lyrics with **local sidecar `.lrc` files taking priority**, followed by cached/LRCLIB
 
   fallback when no matching local lyrics file is available
 
@@ -85,7 +85,7 @@ connection and steps down when the network can't keep up:
 
 - Album/artist artwork repair: local `cover`/`folder`/`front` images first, then conservative exact-match Deezer backfill; nightly database backups
 
-- Optional automatic library refresh from ****Settings → Music library****: Off by default, or
+- Optional automatic library refresh from **Settings → Music library**: Off by default, or
 
   every 5 / 15 / 30 minutes, 1 / 3 / 6 / 12 / 24 hours. Scans never overlap, unchanged
 
@@ -173,7 +173,7 @@ connection and steps down when the network can't keep up:
 
   The OAuth callback supports both the default loopback URL and a configurable HTTPS
 
-  reverse-proxy domain through ****Settings → Spotify**** or the `SPOTIFY_REDIRECT_URI`
+  reverse-proxy domain through **Settings → Spotify** or the `SPOTIFY_REDIRECT_URI`
 
   environment variable
 
@@ -217,7 +217,7 @@ docker compose up -d --build
 
 3. Open `http://<server-ip>:3000` — a setup wizard walks you through creating the first profile
 
-   (which becomes the admin) ****and its web password****, scanning your library, and the optional
+   (which becomes the admin) **and its web password**, scanning your library, and the optional
 
    Lidarr and Spotify hookups. Every step is skippable except establishing the initial admin
 
@@ -238,6 +238,8 @@ docker compose up -d --build
 | `FFMPEG_PATH` | `ffmpeg` | Path to ffmpeg (bundled in the Docker image) |
 | `LIDARR_WEBHOOK_SECRET` | *(none)* | Optional; if set, the Lidarr webhook requires `?token=<secret>` |
 | `AUTH_SECURE_COOKIE` | *(auto)* | Force the web session cookie to `Secure`; use `true` behind HTTPS if proxy detection is unavailable |
+| `AUTH_MIN_PASSWORD_LENGTH` | `4` | Minimum web password length. `4` allows a PIN on a home network; raise it (e.g. `12`) if Spotless is reachable from the internet |
+| `TRUST_PROXY` | *(off)* | Number of reverse-proxy hops in front of Spotless (usually `1`). Lets login throttling read the client IP from `X-Forwarded-For`; leave unset when clients connect directly, because the header can be forged |
 
 Automatic library refresh is configured inside **Settings → Music library** and is stored
 in `DATA_DIR/library.db`; no environment variable is required. The default is **Off**.
@@ -275,7 +277,9 @@ Spotless uses normal username/profile + password authentication for the web UI.
 
 - Web passwords are hashed with Node's memory-hard `scrypt`; plaintext web passwords are never stored.
 
-- Login attempts are progressively rate-limited after repeated failures.
+- Login attempts are progressively rate-limited after repeated failures. Without `TRUST_PROXY` the limit is per profile (so failed guesses from anyone can briefly delay that profile's sign-in); with `TRUST_PROXY` set to your proxy hop count it is per profile and client IP.
+
+- Password checks run off the main thread and at most two at a time; excess sign-in attempts get HTTP 429, so a login flood can't stall playback.
 
 - Mutating `/api/*` requests are protected by same-origin checks in addition to the SameSite cookie policy.
 
@@ -287,7 +291,7 @@ Spotless uses normal username/profile + password authentication for the web UI.
 
 The first profile is the administrator.
 
-Open the profile menu and choose ****Manage profiles****, or go directly to:
+Open the profile menu and choose **Manage profiles**, or go directly to:
 
 ```text
 
@@ -322,11 +326,11 @@ After rebuilding and starting the new version:
 
 2. Select profile 1 (the existing admin).
 
-3. If the database contains existing profiles but ****no web password has ever been configured****, Spotless offers a one-time ****Create admin password**** flow.
+3. If the database contains existing profiles but **no web password has ever been configured**, Spotless offers a one-time **Create admin password** flow.
 
-4. Create an admin password of at least 15 characters.
+4. Create an admin password or PIN (at least `AUTH_MIN_PASSWORD_LENGTH` characters, default 4).
 
-5. Sign in and open ****Manage profiles****.
+5. Sign in and open **Manage profiles**.
 
 6. Assign passwords to the other existing profiles.
 
@@ -338,7 +342,7 @@ Do this migration while the old passwordless installation is still restricted to
 
 #### HTTPS and secure cookies
 
-Authentication protects the application account boundary, but it does ****not**** replace transport encryption.
+Authentication protects the application account boundary, but it does **not** replace transport encryption.
 
 For remote access, use HTTPS through a reverse proxy or use a private network/VPN such as Tailscale or WireGuard. Do not expose plain HTTP directly to the public Internet.
 
@@ -376,7 +380,7 @@ Spotless supports both:
 
 - Legacy Subsonic **`getLyrics`** for plain-text lyrics
 
-- OpenSubsonic **`getLyricsBySongId`***through **`songLyrics` v1** for synchronized,
+- OpenSubsonic **`getLyricsBySongId`** through **`songLyrics` v1** for synchronized,
 
   timestamped lyrics
 
@@ -469,7 +473,13 @@ https://music.example.com/api/spotify/callback
 
    Spotless through a LAN/IP address, Spotless redirects the browser to the configured
 
-   public origin before starting OAuth so the PKCE flow and callback use the same origin.
+   public origin with a single-use, two-minute link that carries your signed-in profile, so
+
+   you don't need to be signed in on that origin. The OAuth state and target profile are kept
+
+   server-side; the browser can't choose which profile the Spotify account is attached to.
+
+   You land on the public origin afterwards; sign in there once if you want to keep using it.
 
 6. While the Spotify app is in development mode, add each Spotify account that will connect
 
@@ -501,7 +511,7 @@ npm run dev
 
 Spotless now has web authentication, but secure deployment still matters.
 
-**Web UI authentication***
+**Web UI authentication**
 
 - Every web profile has its own password.
 
@@ -515,7 +525,7 @@ Spotless now has web authentication, but secure deployment still matters.
 
 - Cross-site state-changing API requests are rejected.
 
-- Repeated failed logins are progressively rate-limited.
+- Repeated failed logins are progressively rate-limited (per profile, or per profile and IP with `TRUST_PROXY`).
 
 - Password resets revoke the affected profile's active web sessions.
 
@@ -545,7 +555,9 @@ Do not publicly expose Spotless over plain HTTP.
 
 **Password guidance**
 
-Spotless intentionally uses normal passwords rather than a short 4- or 6-digit PIN as the primary web authenticator. Use a long, unique passphrase; the UI requires at least 15 characters.
+A 4-digit PIN is accepted by default for convenience on a home network. Throttling slows guessing to roughly a hundred attempts per profile per day, which is enough on a LAN but not a real barrier for an internet-facing server. If Spotless is reachable from the internet, set `AUTH_MIN_PASSWORD_LENGTH=12` (or higher) and use long, unique passphrases.
+
+**Upgrading from a passwordless version:** the first person to open the profile picker after the upgrade can claim the admin profile by setting its password. If your server was reachable by people you don't trust, do the upgrade and claim the admin password yourself immediately.
 
 For Internet-facing access, authentication + HTTPS is the minimum recommended deployment. A VPN/private-network layer is still a useful additional boundary for a self-hosted personal server.
 

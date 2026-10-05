@@ -108,7 +108,7 @@ export default function ProfilePicker({ onSelected }: { onSelected: (u: User) =>
                 maxLength={128}
                 className="w-full rounded bg-highlight px-3 py-2.5 text-sm text-white placeholder:text-subdued outline-none focus:shadow-insetBorder"
               />
-              {isBootstrap && <p className="text-xs text-subdued">Use at least 15 characters. A passphrase is easiest to remember.</p>}
+              {isBootstrap && <p className="text-xs text-subdued">A PIN is fine on a home network; use a long passphrase if Spotless is reachable from the internet.</p>}
               <button type="submit" disabled={busy || !password} className="btn-primary w-full">
                 {busy ? 'Signing in…' : isBootstrap ? 'Secure & sign in' : 'Sign in'}
               </button>

@@ -164,6 +164,58 @@ export function makePkce() {
   return { verifier, challenge, state };
 }
 
+// OAuth bookkeeping lives server-side so the browser can't choose which profile a
+// Spotify account lands on. Both maps are single-use and short-lived.
+interface PendingOAuth {
+  userId: number;
+  verifier: string;
+  redirectUri: string;
+  expiresAt: number;
+}
+const oauthGlobal = globalThis as typeof globalThis & {
+  __spotlessSpotifyOAuth?: { pending: Map<string, PendingOAuth>; handoffs: Map<string, { userId: number; expiresAt: number }> };
+};
+const oauth = (oauthGlobal.__spotlessSpotifyOAuth ??= { pending: new Map(), handoffs: new Map() });
+
+function sweep<T extends { expiresAt: number }>(m: Map<string, T>): void {
+  const now = Date.now();
+  for (const [k, v] of m) if (v.expiresAt <= now) m.delete(k);
+}
+
+function take<T extends { expiresAt: number }>(m: Map<string, T>, key: string | null | undefined): T | null {
+  if (!key) return null;
+  const v = m.get(key);
+  m.delete(key);
+  return v && v.expiresAt > Date.now() ? v : null;
+}
+
+/**
+ * One-time ticket carrying the signed-in profile across to the configured redirect
+ * origin, where this browser may have no session cookie yet.
+ */
+export function createHandoff(userId: number): string {
+  sweep(oauth.handoffs);
+  const nonce = crypto.randomBytes(32).toString('base64url');
+  oauth.handoffs.set(nonce, { userId, expiresAt: Date.now() + 2 * 60_000 });
+  return nonce;
+}
+
+export function takeHandoff(nonce: string | null): number | null {
+  return take(oauth.handoffs, nonce)?.userId ?? null;
+}
+
+/** Start an authorization for userId; returns the state and the Spotify URL to send the browser to. */
+export function beginOAuth(userId: number, redirectUri: string): { state: string; url: string } {
+  sweep(oauth.pending);
+  const { verifier, challenge, state } = makePkce();
+  oauth.pending.set(state, { userId, verifier, redirectUri, expiresAt: Date.now() + 10 * 60_000 });
+  return { state, url: authUrl(challenge, redirectUri, state) };
+}
+
+export function takeOAuth(state: string | null): PendingOAuth | null {
+  return take(oauth.pending, state);
+}
+
 export function authUrl(challenge: string, redirectUri: string, state: string): string {
   const params = new URLSearchParams({
     client_id: CLIENT_ID,

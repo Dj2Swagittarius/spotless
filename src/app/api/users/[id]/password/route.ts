@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  AuthBusyError,
   createSession,
   hashPassword,
   revokeUserSessions,
@@ -32,14 +33,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const passwordError = validateNewPassword(newPassword);
   if (passwordError) return NextResponse.json({ error: passwordError }, { status: 400 });
 
-  // Changing your own password requires the existing password, even for admin.
-  if (isSelf) {
-    if (!target.passwordHash || !verifyPassword(currentPassword, target.passwordHash)) {
+  let newHash: string;
+  try {
+    // Changing your own password requires the existing password, even for admin.
+    if (isSelf && (!target.passwordHash || !(await verifyPassword(currentPassword, target.passwordHash)))) {
       return NextResponse.json({ error: 'Current password is incorrect.' }, { status: 401 });
     }
+    newHash = await hashPassword(newPassword);
+  } catch (err) {
+    if (err instanceof AuthBusyError) return NextResponse.json({ error: err.message }, { status: 429 });
+    throw err;
   }
 
-  getDb().prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), targetId);
+  getDb().prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, targetId);
   revokeUserSessions(targetId);
 
   const res = NextResponse.json({ ok: true });

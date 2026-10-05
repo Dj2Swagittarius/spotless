@@ -1,69 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exchangeCode, importTaste, normalizeSpotifyRedirectUri, getSpotifyRedirectConfig } from '@/lib/spotify';
-import { getUser } from '@/lib/user';
+import { exchangeCode, getSpotifyRedirectConfig, importTaste, takeOAuth } from '@/lib/spotify';
 
 export const dynamic = 'force-dynamic';
 
-const OAUTH_COOKIES = ['spotify_verifier', 'spotify_oauth_state', 'spotify_oauth_user', 'spotify_redirect_uri'] as const;
-
-function redirectAndClear(url: string, userId?: number): NextResponse {
-  const res = NextResponse.redirect(url);
-  for (const name of OAUTH_COOKIES) res.cookies.delete(name);
-  // If OAuth started on a LAN/IP origin and bounced to a configured public
-  // domain, preserve the selected Spotless profile on that public origin too.
-  if (userId && getUser(userId)) {
-    res.cookies.set('uid', String(userId), { path: '/', maxAge: 60 * 60 * 24 * 365, sameSite: 'lax' });
-  }
+function done(origin: string, query: string): NextResponse {
+  const res = NextResponse.redirect(`${origin}/discover?${query}`);
+  res.cookies.delete('spotify_oauth_state');
   return res;
 }
 
-function fallbackOrigin(): string {
-  return getSpotifyRedirectConfig().origin;
-}
-
+// Public in the proxy: identity comes from the server-side OAuth record, not a session.
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
-  const code = params.get('code');
-  const returnedState = params.get('state');
-  const verifier = req.cookies.get('spotify_verifier')?.value;
-  const expectedState = req.cookies.get('spotify_oauth_state')?.value;
-  const rawUserId = req.cookies.get('spotify_oauth_user')?.value;
-  const rawRedirectUri = req.cookies.get('spotify_redirect_uri')?.value;
-
-  let redirectUri: string;
-  try {
-    redirectUri = rawRedirectUri ? normalizeSpotifyRedirectUri(rawRedirectUri) : getSpotifyRedirectConfig().redirectUri;
-  } catch {
-    redirectUri = getSpotifyRedirectConfig().redirectUri;
-  }
-  const origin = new URL(redirectUri).origin || fallbackOrigin();
+  const state = params.get('state');
+  const cookieState = req.cookies.get('spotify_oauth_state')?.value;
+  const pending = state && cookieState === state ? takeOAuth(state) : null;
+  const origin = pending ? new URL(pending.redirectUri).origin : getSpotifyRedirectConfig().origin;
 
   const oauthError = params.get('error');
-  if (oauthError) {
-    return redirectAndClear(`${origin}/discover?spotify_error=${encodeURIComponent(oauthError)}`);
-  }
+  if (oauthError) return done(origin, `spotify_error=${encodeURIComponent(oauthError)}`);
 
-  if (!code || !verifier || !returnedState || !expectedState || returnedState !== expectedState) {
-    const reason = !verifier
-      ? 'missing PKCE cookie (start from the Connect button)'
-      : !returnedState || !expectedState || returnedState !== expectedState
-        ? 'invalid OAuth state (start the Spotify connection again)'
-        : 'no code';
-    return redirectAndClear(`${origin}/discover?spotify_error=${encodeURIComponent(reason)}`);
-  }
-
-  const userId = Number(rawUserId);
-  if (!Number.isInteger(userId) || !getUser(userId)) {
-    return redirectAndClear(`${origin}/discover?spotify_error=${encodeURIComponent('profile session lost; start the Spotify connection again')}`);
+  const code = params.get('code');
+  if (!pending || !code) {
+    const reason = !pending ? 'invalid or expired OAuth state (start the Spotify connection again)' : 'no code';
+    return done(origin, `spotify_error=${encodeURIComponent(reason)}`);
   }
 
   try {
-    await exchangeCode(userId, code, verifier, redirectUri);
-    await importTaste(userId);
+    await exchangeCode(pending.userId, code, pending.verifier, pending.redirectUri);
+    await importTaste(pending.userId);
   } catch (err) {
     console.error('spotify connect failed:', err);
-    return redirectAndClear(`${origin}/discover?spotify_error=${encodeURIComponent('token exchange or import failed')}`);
+    return done(origin, `spotify_error=${encodeURIComponent('token exchange or import failed')}`);
   }
-
-  return redirectAndClear(`${origin}/discover?spotify=connected`, userId);
+  return done(origin, 'spotify=connected');
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSession, hashPassword, setSessionCookie, validateNewPassword } from '@/lib/auth';
+import { AuthBusyError, createSession, hashPassword, setSessionCookie, validateNewPassword } from '@/lib/auth';
 import { createUser, currentUserFrom, isAdmin, legacyBootstrapAllowed, listUsers, requireAdmin } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -30,13 +30,14 @@ export async function POST(req: NextRequest) {
   if (passwordError) return NextResponse.json({ error: passwordError }, { status: 400 });
 
   try {
-    const user = createUser(name, hashPassword(password));
+    const user = createUser(name, await hashPassword(password));
     const res = NextResponse.json(user, { status: 201 });
     res.headers.set('Cache-Control', 'no-store');
     // Fresh install: authenticate the first/admin user immediately so the setup wizard can continue.
     if (users.length === 0) setSessionCookie(res, req, createSession(user.id));
     return res;
-  } catch {
+  } catch (err) {
+    if (err instanceof AuthBusyError) return NextResponse.json({ error: err.message }, { status: 429 });
     return NextResponse.json({ error: 'Name already taken.' }, { status: 400 });
   }
 }

@@ -3,8 +3,12 @@ import type { NextRequest, NextResponse } from 'next/server';
 import { getDb } from './db';
 
 export const SESSION_COOKIE = 'spotless_session';
-export const PASSWORD_MIN_LENGTH = 15;
+// 4 allows a PIN on a home LAN; raise it with AUTH_MIN_PASSWORD_LENGTH when exposing Spotless publicly.
 export const PASSWORD_MAX_LENGTH = 128;
+export const PASSWORD_MIN_LENGTH = (() => {
+  const n = Number(process.env.AUTH_MIN_PASSWORD_LENGTH);
+  return Number.isInteger(n) && n >= 4 ? Math.min(n, PASSWORD_MAX_LENGTH) : 4;
+})();
 
 const SESSION_ABSOLUTE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const SESSION_IDLE_SECONDS = 60 * 60 * 24 * 7; // 7 days
@@ -16,6 +20,36 @@ const SCRYPT_R = 8;
 const SCRYPT_P = 3;
 const SCRYPT_KEYLEN = 32;
 const SCRYPT_MAXMEM = 128 * 1024 * 1024;
+
+// scrypt runs on libuv's small threadpool, which file streaming also uses. Cap
+// concurrent derivations and shed excess load so login floods can't stall playback.
+const SCRYPT_MAX_ACTIVE = 2;
+const SCRYPT_MAX_QUEUED = 16;
+let scryptActive = 0;
+const scryptQueue: (() => void)[] = [];
+
+/** Thrown when too many password checks are already in flight. */
+export class AuthBusyError extends Error {
+  constructor() {
+    super('Too many sign-in attempts in progress. Try again shortly.');
+  }
+}
+
+async function derive(password: string, salt: Buffer, keylen: number, N: number, r: number, p: number): Promise<Buffer> {
+  if (scryptActive >= SCRYPT_MAX_ACTIVE) {
+    if (scryptQueue.length >= SCRYPT_MAX_QUEUED) throw new AuthBusyError();
+    await new Promise<void>((resolve) => scryptQueue.push(resolve));
+  }
+  scryptActive++;
+  try {
+    return await new Promise<Buffer>((resolve, reject) =>
+      crypto.scrypt(password, salt, keylen, { N, r, p, maxmem: SCRYPT_MAXMEM }, (err, key) => (err ? reject(err) : resolve(key)))
+    );
+  } finally {
+    scryptActive--;
+    scryptQueue.shift()?.();
+  }
+}
 
 export interface AuthSession {
   userId: number;
@@ -41,19 +75,14 @@ export function validateNewPassword(raw: string): string | null {
   return null;
 }
 
-export function hashPassword(raw: string): string {
+export async function hashPassword(raw: string): Promise<string> {
   const password = normalizePassword(raw);
   const salt = crypto.randomBytes(16);
-  const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-    maxmem: SCRYPT_MAXMEM,
-  });
+  const derived = await derive(password, salt, SCRYPT_KEYLEN, SCRYPT_N, SCRYPT_R, SCRYPT_P);
   return `scrypt$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt.toString('base64url')}$${derived.toString('base64url')}`;
 }
 
-export function verifyPassword(raw: string, encoded: string): boolean {
+export async function verifyPassword(raw: string, encoded: string): Promise<boolean> {
   try {
     const [kind, nRaw, rRaw, pRaw, saltRaw, digestRaw] = encoded.split('$');
     if (kind !== 'scrypt' || !nRaw || !rRaw || !pRaw || !saltRaw || !digestRaw) return false;
@@ -63,26 +92,17 @@ export function verifyPassword(raw: string, encoded: string): boolean {
     if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p) || N < 2 || r < 1 || p < 1) return false;
     const expected = Buffer.from(digestRaw, 'base64url');
     if (expected.length < 16 || expected.length > 128) return false;
-    const actual = crypto.scryptSync(normalizePassword(raw), Buffer.from(saltRaw, 'base64url'), expected.length, {
-      N,
-      r,
-      p,
-      maxmem: SCRYPT_MAXMEM,
-    });
+    const actual = await derive(normalizePassword(raw), Buffer.from(saltRaw, 'base64url'), expected.length, N, r, p);
     return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-  } catch {
+  } catch (err) {
+    if (err instanceof AuthBusyError) throw err;
     return false;
   }
 }
 
 /** Burn roughly one real password-verification cost for unknown/unconfigured users. */
-export function burnPasswordCheck(raw: string): void {
-  crypto.scryptSync(normalizePassword(raw), Buffer.from('spotless-auth-fake-salt-v1'), SCRYPT_KEYLEN, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-    maxmem: SCRYPT_MAXMEM,
-  });
+export async function burnPasswordCheck(raw: string): Promise<void> {
+  await derive(normalizePassword(raw), Buffer.from('spotless-auth-fake-salt-v1'), SCRYPT_KEYLEN, SCRYPT_N, SCRYPT_R, SCRYPT_P);
 }
 
 function sessionTokenHash(token: string): string {
@@ -175,12 +195,20 @@ export function clearSessionCookie(res: NextResponse, req: NextRequest): void {
   res.cookies.set('uid', '', { path: '/', maxAge: 0, sameSite: 'lax' });
 }
 
+/**
+ * Client address for login throttling. X-Forwarded-For is client-controlled unless a
+ * reverse proxy you run appends to it, so it is only read when TRUST_PROXY sets how many
+ * proxy hops to trust; the entry that many hops from the right is the one your proxy saw.
+ * Without it every request shares one bucket, so throttling is per profile.
+ */
 export function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('x-real-ip')?.trim() ||
-    'unknown'
-  );
+  const hops = Number(process.env.TRUST_PROXY);
+  if (!Number.isInteger(hops) || hops < 1) return 'direct';
+  const chain = (req.headers.get('x-forwarded-for') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return chain[chain.length - hops] ?? chain[0] ?? 'direct';
 }
 
 function attemptKey(userId: number, ip: string): string {
@@ -204,7 +232,8 @@ export function recordLoginFailure(userId: number, ip: string): void {
   const row = db
     .prepare('SELECT failures, window_started_at AS windowStartedAt FROM auth_login_attempts WHERE key = ?')
     .get(key) as { failures: number; windowStartedAt: number } | undefined;
-  const withinWindow = row && row.windowStartedAt >= now - 600;
+  // 24h window, longer than the 15-minute maximum block, so the count can't reset between blocks
+  const withinWindow = row && row.windowStartedAt >= now - 86400;
   const failures = withinWindow ? row.failures + 1 : 1;
   const windowStartedAt = withinWindow ? row.windowStartedAt : now;
   // Progressive backoff after five failures: 30s, 60s, 2m, 4m... capped at 15m.

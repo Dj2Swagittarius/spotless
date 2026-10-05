@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearSessionCookie, sessionFromRequest } from '@/lib/auth';
 
-const PUBLIC_API = new Set(['/api/users', '/api/users/select', '/api/setup']);
+// spotify login/callback authenticate themselves (session or one-time handoff, server-side OAuth state)
+const PUBLIC_API = new Set(['/api/users', '/api/users/select', '/api/setup', '/api/spotify/login', '/api/spotify/callback']);
 const CSRF_EXEMPT = new Set(['/api/lidarr/webhook']);
 const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 

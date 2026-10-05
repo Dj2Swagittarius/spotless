@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  AuthBusyError,
   burnPasswordCheck,
   clearLoginFailures,
   clearSessionCookie,
@@ -18,7 +19,24 @@ import { getDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+
+function busy(): NextResponse {
+  const res = NextResponse.json({ error: 'Too many sign-in attempts in progress. Try again shortly.' }, { status: 429 });
+  res.headers.set('Retry-After', '5');
+  res.headers.set('Cache-Control', 'no-store');
+  return res;
+}
+
 export async function POST(req: NextRequest) {
+  try {
+    return await signIn(req);
+  } catch (err) {
+    if (err instanceof AuthBusyError) return busy();
+    throw err;
+  }
+}
+
+async function signIn(req: NextRequest): Promise<NextResponse> {
   const body = await req.json().catch(() => ({}));
   const id = Number(body.id);
   const password = String(body.password ?? '');
@@ -35,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   const user = userId ? getAuthUser(userId) : null;
   if (!user) {
-    burnPasswordCheck(password);
+    await burnPasswordCheck(password);
     recordLoginFailure(userId, ip);
     return NextResponse.json({ error: 'Invalid profile or password.' }, { status: 401 });
   }
@@ -44,13 +62,13 @@ export async function POST(req: NextRequest) {
   // and only while no web password exists anywhere yet. This path permanently closes after use.
   if (!user.passwordHash) {
     if (user.id !== ADMIN_USER_ID || !legacyBootstrapAllowed()) {
-      burnPasswordCheck(password);
+      await burnPasswordCheck(password);
       return NextResponse.json({ error: 'This profile has no password yet. Ask the admin to set one.' }, { status: 403 });
     }
     const passwordError = validateNewPassword(password);
     if (passwordError) return NextResponse.json({ error: passwordError }, { status: 400 });
-    getDb().prepare('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash IS NULL').run(hashPassword(password), user.id);
-  } else if (!verifyPassword(password, user.passwordHash)) {
+    getDb().prepare('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash IS NULL').run(await hashPassword(password), user.id);
+  } else if (!(await verifyPassword(password, user.passwordHash))) {
     recordLoginFailure(user.id, ip);
     return NextResponse.json({ error: 'Invalid profile or password.' }, { status: 401 });
   }

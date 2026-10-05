@@ -225,7 +225,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
                 className={input}
               />
               <p className="text-xs text-subdued">
-                Minimum 15 characters. There are no forced symbol/number rules; a long passphrase is recommended.
+                A PIN is fine on a home network; use a long passphrase if Spotless is reachable from the internet.
               </p>
               {profileErr && <div className="text-sm text-negative">{profileErr}</div>}
               <div className="flex justify-end">

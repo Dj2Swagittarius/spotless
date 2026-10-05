@@ -82,7 +82,7 @@ function PasswordForm({
         maxLength={128}
         className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
       />
-      <div className="text-xs text-subdued">Minimum 15 characters; long passphrases are recommended.</div>
+      <div className="text-xs text-subdued">A PIN is fine on a home network; use a long passphrase if Spotless is reachable from the internet.</div>
       {error && <div className="text-sm text-negative">{error}</div>}
       <button className="btn-pill" disabled={busy || !newPassword || !confirm || (isSelf && !currentPassword)}>
         {busy ? 'Saving…' : isSelf ? 'Change my password' : 'Reset password'}
@@ -188,7 +188,7 @@ export default function UsersPage() {
               autoComplete="new-password"
               className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
             />
-            <div className="text-xs text-subdued">Minimum 15 characters; there are no forced symbol or number rules.</div>
+            <div className="text-xs text-subdued">A PIN is fine on a home network; use a long passphrase if Spotless is reachable from the internet.</div>
             {error && <div className="text-sm text-negative">{error}</div>}
             <button className="btn-primary" disabled={createBusy || !name.trim() || !password || !confirm}>
               {createBusy ? 'Creating…' : 'Create profile'}
