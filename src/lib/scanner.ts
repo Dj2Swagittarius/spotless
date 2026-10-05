@@ -6,6 +6,38 @@ import { getDb, artDir, getSetting, setSetting } from './db';
 const DEFAULT_MUSIC_DIR = process.env.MUSIC_DIR || path.join(process.cwd(), 'music');
 const EXTS = new Set(['.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac']);
 
+const AUTO_SCAN_SETTING = 'library_auto_scan_minutes';
+export const AUTO_SCAN_INTERVALS = [0, 5, 15, 30, 60, 180, 360, 720, 1440] as const;
+export type AutoScanIntervalMinutes = (typeof AUTO_SCAN_INTERVALS)[number];
+const AUTO_SCAN_ALLOWED = new Set<number>(AUTO_SCAN_INTERVALS);
+
+type LastScan = { at: string; added: number; removed: number; total: number };
+type LastScanError = { at: string; message: string };
+type ScannerRuntime = {
+  scanning: boolean;
+  lastScan: LastScan | null;
+  lastScanError: LastScanError | null;
+  schedulerStarted: boolean;
+  autoScanTimer: ReturnType<typeof setTimeout> | null;
+  nextAutoScanAt: string | null;
+};
+
+// Next.js can bundle server modules into more than one server chunk. Keeping the
+// runtime state on globalThis makes the scan lock and scheduler process-wide.
+const runtimeGlobal = globalThis as typeof globalThis & {
+  __spotlessScannerRuntimeV1?: ScannerRuntime;
+};
+const runtime: ScannerRuntime =
+  runtimeGlobal.__spotlessScannerRuntimeV1 ??
+  (runtimeGlobal.__spotlessScannerRuntimeV1 = {
+    scanning: false,
+    lastScan: null,
+    lastScanError: null,
+    schedulerStarted: false,
+    autoScanTimer: null,
+    nextAutoScanAt: null,
+  });
+
 export function getMusicDir(): string {
   return getSetting('music_dir') || DEFAULT_MUSIC_DIR;
 }
@@ -17,11 +49,62 @@ export function setMusicDir(dir: string): void {
   setSetting('music_dir', resolved);
 }
 
-let scanning = false;
-let lastScan: { at: string; added: number; removed: number; total: number } | null = null;
+export function getAutoScanIntervalMinutes(): AutoScanIntervalMinutes {
+  const raw = Number(getSetting(AUTO_SCAN_SETTING) ?? 0);
+  return AUTO_SCAN_ALLOWED.has(raw) ? (raw as AutoScanIntervalMinutes) : 0;
+}
+
+export function setAutoScanIntervalMinutes(minutes: number): AutoScanIntervalMinutes {
+  if (!Number.isInteger(minutes) || !AUTO_SCAN_ALLOWED.has(minutes)) {
+    throw new Error(`Unsupported automatic scan interval: ${minutes}`);
+  }
+  const value = minutes as AutoScanIntervalMinutes;
+  setSetting(AUTO_SCAN_SETTING, String(value));
+  if (runtime.schedulerStarted) scheduleNextAutoScan();
+  return value;
+}
+
+function scheduleNextAutoScan(): void {
+  if (runtime.autoScanTimer) {
+    clearTimeout(runtime.autoScanTimer);
+    runtime.autoScanTimer = null;
+  }
+  runtime.nextAutoScanAt = null;
+
+  if (!runtime.schedulerStarted) return;
+
+  const minutes = getAutoScanIntervalMinutes();
+  if (minutes === 0) return;
+
+  const delayMs = minutes * 60 * 1000;
+  runtime.nextAutoScanAt = new Date(Date.now() + delayMs).toISOString();
+
+  const timer = setTimeout(() => {
+    runtime.autoScanTimer = null;
+    runtime.nextAutoScanAt = null;
+    scanLibrary({ automatic: true }).catch((err) => console.error('automatic scan failed:', err));
+  }, delayMs);
+
+  // The HTTP server itself keeps the process alive; the scheduler should not.
+  timer.unref?.();
+  runtime.autoScanTimer = timer;
+}
+
+/** Start/resume the persistent in-process scheduler for this Spotless server instance. */
+export function startLibraryScanScheduler(): void {
+  runtime.schedulerStarted = true;
+  scheduleNextAutoScan();
+}
 
 export function scanStatus() {
-  return { scanning, lastScan };
+  return {
+    scanning: runtime.scanning,
+    lastScan: runtime.lastScan,
+    lastScanError: runtime.lastScanError,
+    autoScanIntervalMinutes: getAutoScanIntervalMinutes(),
+    nextAutoScanAt: runtime.nextAutoScanAt,
+    allowedAutoScanIntervals: AUTO_SCAN_INTERVALS,
+  };
 }
 
 /** Fold text for matching: strip diacritics (Tiësto = Tiesto), unify quotes/spaces, lowercase. */
@@ -177,12 +260,9 @@ export function dedupeLibrary(db: ReturnType<typeof getDb>): void {
 }
 
 function walk(dir: string, out: string[] = []): string[] {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
+  // Deliberately let read errors abort the scan. Returning a partial/empty list
+  // would make the removal phase interpret temporarily-unreadable files as deleted.
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const e of entries) {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) walk(full, out);
@@ -191,9 +271,12 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-export async function scanLibrary(): Promise<void> {
-  if (scanning) return;
-  scanning = true;
+export async function scanLibrary(options: { automatic?: boolean } = {}): Promise<void> {
+  if (runtime.scanning) {
+    if (runtime.schedulerStarted) scheduleNextAutoScan();
+    return;
+  }
+  runtime.scanning = true;
   try {
     const db = getDb();
     // TS resolves the browser entry which lacks parseFile; runtime (node) has it
@@ -203,11 +286,25 @@ export async function scanLibrary(): Promise<void> {
     // fold pre-existing duplicate artists/albums together before matching new files
     dedupeLibrary(db);
 
-    const files = walk(getMusicDir());
+    const musicDir = getMusicDir();
+    const rootStat = fs.statSync(musicDir);
+    if (!rootStat.isDirectory()) throw new Error(`Music directory is not a directory: ${musicDir}`);
+    fs.accessSync(musicDir, fs.constants.R_OK);
+
+    const files = walk(musicDir);
     const fileSet = new Set(files);
 
     // remove tracks whose files vanished
     const existing = db.prepare('SELECT id, path FROM tracks').all() as { id: number; path: string }[];
+
+    // A temporarily missing bind/NAS mount can appear as a perfectly readable but
+    // empty directory. Never let an unattended automatic scan erase a previously
+    // populated library in that situation. A manual Rescan now still permits an
+    // intentionally emptied library to be cleared.
+    if (options.automatic && files.length === 0 && existing.length > 0) {
+      throw new Error(`Automatic scan aborted: music directory is empty (${musicDir})`);
+    }
+
     let removed = 0;
     const delTrack = db.prepare('DELETE FROM tracks WHERE id = ?');
     for (const row of existing) {
@@ -245,6 +342,7 @@ export async function scanLibrary(): Promise<void> {
     `);
 
     let added = 0;
+    let changed = 0;
     for (const file of files) {
       let stat: fs.Stats;
       try {
@@ -297,6 +395,7 @@ export async function scanLibrary(): Promise<void> {
           mtime,
           gain: c.replaygain_track_gain?.dB ?? null,
         });
+        changed++;
         if (!known) added++;
       } catch (err) {
         console.warn(`scan: failed to parse ${file}:`, err);
@@ -317,13 +416,30 @@ export async function scanLibrary(): Promise<void> {
     }
 
     const total = (db.prepare('SELECT COUNT(*) AS n FROM tracks').get() as { n: number }).n;
-    lastScan = { at: new Date().toISOString(), added, removed, total };
+    runtime.lastScan = { at: new Date().toISOString(), added, removed, total };
+    runtime.lastScanError = null;
     console.log(`scan: done. +${added} -${removed}, total ${total}`);
 
-    // backfill any missing album/artist artwork in the background
-    const { fetchMissingArt } = await import('./art');
-    fetchMissingArt().catch((err) => console.error('art fetch failed:', err));
+    // Preserve the existing behavior for startup/manual/webhook scans. Automatic
+    // scans only trigger remote artwork backfill when the library actually changed,
+    // avoiding unnecessary network requests every 5/15/etc. minutes.
+    if (!options.automatic || changed > 0 || removed > 0) {
+      const { fetchMissingArt } = await import('./art');
+      fetchMissingArt().catch((err) => console.error('art fetch failed:', err));
+    }
+
+    // Optional synced-LRC sidecar job. It is process-locked, never overwrites an
+    // existing .lrc/.LRC, and throttles its own LRCLIB requests.
+    const { triggerLyricsSidecarSync } = await import('./lyrics');
+    triggerLyricsSidecarSync();
+  } catch (err) {
+    runtime.lastScanError = {
+      at: new Date().toISOString(),
+      message: err instanceof Error ? err.message : String(err),
+    };
+    throw err;
   } finally {
-    scanning = false;
+    runtime.scanning = false;
+    if (runtime.schedulerStarted) scheduleNextAutoScan();
   }
 }

@@ -10,8 +10,8 @@ interface User {
   id: number;
   name: string;
   color: string;
+  isAdmin?: boolean;
 }
-
 export default function TopBar() {
   const router = useRouter();
   const pathname = usePathname();
@@ -24,12 +24,10 @@ export default function TopBar() {
   useEffect(() => {
     if (pathname !== '/search') setQ('');
   }, [pathname]);
-
   useEffect(() => {
-    fetch('/api/users').then((r) => r.json()).then((d) => setMe(d.current)).catch(() => {});
+    fetch('/api/users', { cache: 'no-store' }).then((r) => r.json()).then((d) => setMe(d.current)).catch(() => {});
   }, []);
 
-  // close menu on outside click
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -38,7 +36,6 @@ export default function TopBar() {
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [menuOpen]);
-
   const onChange = (v: string) => {
     setQ(v);
     if (timer.current) clearTimeout(timer.current);
@@ -51,15 +48,11 @@ export default function TopBar() {
     await fetch('/api/users/select', { method: 'DELETE' });
     location.reload();
   };
-
   return (
     <div className="hidden items-center gap-3 px-4 pt-2 md:flex">
-      {/* brand */}
       <Link href="/" className="w-56 shrink-0">
         <Logo />
       </Link>
-
-      {/* center: home + search */}
       <div className="flex flex-1 items-center justify-center gap-2">
         <Link
           href="/"
@@ -80,8 +73,6 @@ export default function TopBar() {
           />
         </div>
       </div>
-
-      {/* right: profile */}
       <div className="relative flex w-56 shrink-0 items-center justify-end" ref={menuRef}>
         <button
           onClick={() => setMenuOpen((v) => !v)}
@@ -104,7 +95,7 @@ export default function TopBar() {
               </span>
               <div className="min-w-0">
                 <div className="truncate text-sm font-bold">{me?.name ?? 'No profile'}</div>
-                <div className="text-xs text-subdued">Profile</div>
+                <div className="text-xs text-subdued">{me?.isAdmin ? 'Admin profile' : 'Profile'}</div>
               </div>
             </div>
             <div className="mx-2 my-1 border-t border-border/40" />
@@ -115,11 +106,18 @@ export default function TopBar() {
             >
               <GearIcon size={16} /> Settings
             </Link>
+            <Link
+              href="/users"
+              onClick={() => setMenuOpen(false)}
+              className="flex items-center gap-3 rounded px-3 py-2 text-sm hover:bg-highlight"
+            >
+              <span className="inline-block w-4 text-center">♙</span> {me?.isAdmin ? 'Manage profiles' : 'Password'}
+            </Link>
             <button
               onClick={switchUser}
               className="flex w-full items-center gap-3 rounded px-3 py-2 text-left text-sm hover:bg-highlight"
             >
-              <span className="inline-block w-4 text-center">⇄</span> Switch user
+              <span className="inline-block w-4 text-center">⇄</span> Switch user / sign out
             </button>
           </div>
         )}

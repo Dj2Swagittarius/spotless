@@ -5,10 +5,142 @@ import { buildLocalIndex, norm, type WantedTrack } from './playlistMatch';
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
 /** False when no Spotify app is configured (SPOTIFY_CLIENT_ID env) — connect flow unavailable. */
 export const hasSpotifyClient = CLIENT_ID.length > 0;
-// Spotify only allows loopback (127.0.0.1) or HTTPS redirect URIs, so the
-// connect flow must be opened via http://127.0.0.1:3000 — see the login route.
-export const REDIRECT_URI = 'http://127.0.0.1:3000/api/spotify/callback';
+
+const DEFAULT_REDIRECT_URI = 'http://127.0.0.1:3000/api/spotify/callback';
+const REDIRECT_ORIGIN_SETTING = 'spotify_redirect_origin';
+const CALLBACK_PATH = '/api/spotify/callback';
 const SCOPES = 'user-top-read user-library-read playlist-read-private playlist-read-collaborative';
+
+export type SpotifyRedirectSource = 'setting' | 'environment' | 'default';
+
+export interface SpotifyRedirectConfig {
+  /** Saved Settings-page override. Empty when no UI override is stored. */
+  customOrigin: string;
+  /** Origin actually used for login/callback redirects. */
+  origin: string;
+  /** Exact URI sent to Spotify's authorize and token endpoints. */
+  redirectUri: string;
+  source: SpotifyRedirectSource;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+}
+
+function assertSpotifyTransport(url: URL): void {
+  if (url.hostname.toLowerCase() === 'localhost') {
+    throw new Error('Spotify does not allow localhost. Use 127.0.0.1 for local use or an HTTPS domain.');
+  }
+  if (url.protocol === 'https:') return;
+  if (url.protocol === 'http:' && isLoopbackHostname(url.hostname)) return;
+  throw new Error('Spotify requires HTTPS for non-loopback redirect URIs.');
+}
+
+/**
+ * Normalize the Settings-page value. Users enter only an origin/domain, for
+ * example music.example.com or https://music.example.com.
+ */
+export function normalizeSpotifyOrigin(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    throw new Error('Enter a valid domain, for example music.example.com');
+  }
+
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('Enter only the public domain/origin — no credentials, query string or fragment.');
+  }
+  if (url.pathname !== '/' && url.pathname !== '') {
+    throw new Error('Enter only the public domain, not /api/spotify/callback. Spotless adds that path automatically.');
+  }
+
+  assertSpotifyTransport(url);
+  return url.origin;
+}
+
+/** Validate a full callback URI, used for SPOTIFY_REDIRECT_URI and the OAuth cookie. */
+export function normalizeSpotifyRedirectUri(input: string): string {
+  let url: URL;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new Error('SPOTIFY_REDIRECT_URI must be a valid absolute URL.');
+  }
+
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('SPOTIFY_REDIRECT_URI must not contain credentials, a query string or a fragment.');
+  }
+  if (url.pathname !== CALLBACK_PATH) {
+    throw new Error(`SPOTIFY_REDIRECT_URI must end exactly with ${CALLBACK_PATH}`);
+  }
+
+  assertSpotifyTransport(url);
+  return `${url.origin}${CALLBACK_PATH}`;
+}
+
+function envRedirectUri(): string | null {
+  const raw = process.env.SPOTIFY_REDIRECT_URI?.trim();
+  if (!raw) return null;
+  try {
+    return normalizeSpotifyRedirectUri(raw);
+  } catch (err) {
+    console.warn(`spotify: ignoring invalid SPOTIFY_REDIRECT_URI: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+/**
+ * Redirect precedence:
+ * 1) Settings-page override
+ * 2) SPOTIFY_REDIRECT_URI environment variable
+ * 3) built-in loopback default
+ */
+export function getSpotifyRedirectConfig(): SpotifyRedirectConfig {
+  const stored = getSetting(REDIRECT_ORIGIN_SETTING);
+  if (stored) {
+    try {
+      const origin = normalizeSpotifyOrigin(stored);
+      return {
+        customOrigin: origin,
+        origin,
+        redirectUri: `${origin}${CALLBACK_PATH}`,
+        source: 'setting',
+      };
+    } catch (err) {
+      console.warn(`spotify: ignoring invalid saved redirect origin: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const envUri = envRedirectUri();
+  if (envUri) {
+    return {
+      customOrigin: '',
+      origin: new URL(envUri).origin,
+      redirectUri: envUri,
+      source: 'environment',
+    };
+  }
+
+  return {
+    customOrigin: '',
+    origin: new URL(DEFAULT_REDIRECT_URI).origin,
+    redirectUri: DEFAULT_REDIRECT_URI,
+    source: 'default',
+  };
+}
+
+/** Save or clear the Settings-page override and return the resulting effective config. */
+export function saveSpotifyRedirectOrigin(input: string): SpotifyRedirectConfig {
+  const origin = normalizeSpotifyOrigin(input);
+  if (origin) setSetting(REDIRECT_ORIGIN_SETTING, origin);
+  else delSetting(REDIRECT_ORIGIN_SETTING);
+  return getSpotifyRedirectConfig();
+}
 
 const tokensKey = (u: number) => `spotify_tokens:${u}`;
 const tasteKey = (u: number) => `spotify_taste:${u}`;
@@ -28,17 +160,19 @@ export interface SpotifyTaste {
 export function makePkce() {
   const verifier = crypto.randomBytes(64).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-  return { verifier, challenge };
+  const state = crypto.randomBytes(32).toString('base64url');
+  return { verifier, challenge, state };
 }
 
-export function authUrl(challenge: string): string {
+export function authUrl(challenge: string, redirectUri: string, state: string): string {
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     response_type: 'code',
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     scope: SCOPES,
     code_challenge_method: 'S256',
     code_challenge: challenge,
+    state,
   });
   return `https://accounts.spotify.com/authorize?${params}`;
 }
@@ -72,11 +206,11 @@ function loadTokens(userId: number): Tokens | null {
   }
 }
 
-export async function exchangeCode(userId: number, code: string, verifier: string): Promise<void> {
+export async function exchangeCode(userId: number, code: string, verifier: string, redirectUri: string): Promise<void> {
   await tokenRequest(userId, {
     grant_type: 'authorization_code',
     code,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     code_verifier: verifier,
   });
 }
