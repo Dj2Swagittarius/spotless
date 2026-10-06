@@ -1,0 +1,45 @@
+# Local AI DJ test stack: Spotless + Kokoro (TTS) + Speaches (Whisper STT).
+# Start: start-dj-test.bat (Windows) or ./start-dj-test.sh, then open http://localhost:3300/dj
+# The LLM is LM Studio on the LAN (gpt-oss preferred, auto-picked when no model is set).
+# Music is the NAS share, mounted read-only over SMB as guest.
+name: spotless-dj-test
+
+services:
+  spotless:
+    build: ..
+    restart: unless-stopped
+    ports:
+      - "3300:3000"
+    environment:
+      - DJ_PROVIDER=lmstudio
+      - LMSTUDIO_URL=http://192.168.0.50:1234/v1
+      - TTS_URL=http://kokoro:8880/v1
+      - STT_URL=http://speaches:8000/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - music:/music:ro
+      - data:/data
+    depends_on:
+      - kokoro
+      - speaches
+
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    restart: unless-stopped
+
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    restart: unless-stopped
+    volumes:
+      - speaches-models:/home/ubuntu/.cache/huggingface/hub
+
+volumes:
+  data:
+  speaches-models:
+  music:
+    driver: local
+    driver_opts:
+      type: cifs
+      device: //192.168.0.198/enderchest/media/Music
+      o: addr=192.168.0.198,ro,guest,vers=3.0,uid=1000,gid=1000
