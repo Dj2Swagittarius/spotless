@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { HomeIcon, SearchIcon, LibraryIcon, PlusIcon, HeartIcon, MusicIcon, GearIcon, QueueIcon, TrendIcon, RadioIcon } from './Icons';
+import { HomeIcon, SearchIcon, LibraryIcon, PlusIcon, HeartIcon, MusicIcon, GearIcon, QueueIcon, TrendIcon, RadioIcon, DjIcon } from './Icons';
 import PromptModal from './PromptModal';
 import PlaylistCover from './PlaylistCover';
 import type { Playlist, Album, Artist } from '@/lib/types';
@@ -77,6 +77,9 @@ export default function Sidebar() {
         </Link>
         <Link href="/search" className={navClass(pathname === '/search')}>
           <SearchIcon size={24} /> Search
+        </Link>
+        <Link href="/dj" className={navClass(pathname === '/dj')}>
+          <DjIcon size={24} /> AI DJ
         </Link>
         <Link href="/discover" className={navClass(pathname === '/discover')}>
           <MusicIcon size={24} /> Discover

@@ -10,8 +10,16 @@ services:
       - MUSIC_WRITE_DIR=/music-write
     #   # optional — enables the Spotify taste/playlist import (see README)
     #   - SPOTIFY_CLIENT_ID=your_spotify_app_client_id
+    #   # optional AI DJ defaults (Settings → AI DJ overrides them); host.docker.internal = the Docker host
+    #   - OLLAMA_URL=http://host.docker.internal:11434
+    #   - LMSTUDIO_URL=http://host.docker.internal:1234/v1
+    #   - TTS_URL=http://host.docker.internal:8880/v1
+    #   - STT_URL=http://host.docker.internal:8000/v1
     #   # optional deployment default for reverse-proxy OAuth; Settings → Spotify can override it
     #   - SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
+    # lets the AI DJ reach Ollama / LM Studio / voice servers running on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Main application access stays read-only.
       - /path/to/your/music:/music:ro

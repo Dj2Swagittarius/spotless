@@ -143,3 +143,14 @@ export const DotsIcon = (p: IconProps) =>
     </>,
     p
   );
+
+export const DjIcon = (p: IconProps) =>
+  svg(
+    <path d="M3 18v-6a9 9 0 0 1 18 0v6M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />,
+    p,
+    '0 0 24 24',
+    false
+  );
+
+export const SendIcon = (p: IconProps) =>
+  svg(<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />, p, '0 0 24 24', false);

@@ -7,6 +7,7 @@ import MobileNav from './MobileNav';
 import TopBar from './TopBar';
 import ProfilePicker from './ProfilePicker';
 import SetupWizard from './SetupWizard';
+import DjBooth from './DjBooth';
 import { useLikes } from '@/store/likes';
 
 type Gate = 'loading' | 'setup' | 'login' | 'ready';
@@ -53,6 +54,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       <Player />
+      <DjBooth />
       <MobileNav />
     </div>
   );

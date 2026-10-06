@@ -13,6 +13,8 @@ interface PlayerState {
   repeat: Repeat;
   volume: number;
   radio: boolean;
+  /** queue was started by the AI DJ: enables spoken segues between songs */
+  djSession: boolean;
   playQueue: (tracks: Track[], start?: number) => void;
   toggle: () => void;
   setPlaying: (playing: boolean) => void;
@@ -26,6 +28,8 @@ interface PlayerState {
   cycleRepeat: () => void;
   setVolume: (v: number) => void;
   toggleRadio: () => void;
+  /** play exactly this list in order (DJ sets), ignoring radio/shuffle */
+  playDj: (tracks: Track[]) => void;
 }
 
 function shuffleUpcoming(queue: Track[], index: number): Track[] {
@@ -46,9 +50,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   repeat: 'off',
   volume: 1,
   radio: typeof window !== 'undefined' && localStorage.getItem('radio') === '1',
+  djSession: false,
 
   playQueue: (tracks, start = 0) => {
     if (tracks.length === 0) return;
+    set({ djSession: false });
     if (get().radio) {
       // radio mode: seed from the chosen track only; similar tracks fill in behind it
       set({ queue: [tracks[start]], index: 0, isPlaying: true });
@@ -117,6 +123,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set((s) => ({ repeat: s.repeat === 'off' ? 'all' : s.repeat === 'all' ? 'one' : 'off' })),
 
   setVolume: (volume) => set({ volume }),
+
+  playDj: (tracks) => {
+    if (tracks.length === 0) return;
+    set({ queue: tracks.slice(), index: 0, isPlaying: true, djSession: true });
+  },
 
   toggleRadio: () =>
     set((s) => {
