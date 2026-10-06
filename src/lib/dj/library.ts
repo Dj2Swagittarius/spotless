@@ -252,7 +252,11 @@ export function similarTracks(userId: number, seedIds: number[], limit: number):
     );
   // alternate genre neighbours and the seeds' own artists so a set doesn't become one artist
   if (genres.length) take(scored(`t.genre IN (${genres.map(() => '?').join(',')}) AND t.artist_id NOT IN (${artists.map(() => '?').join(',')})`, [...genres, ...artists]).slice(0, Math.ceil(limit * 0.6)));
-  take(scored(`t.artist_id IN (${artists.map(() => '?').join(',')})`, artists));
+  // the seeds' own artists, capped so one artist doesn't take over the set
+  take(scored(`t.artist_id IN (${artists.map(() => '?').join(',')})`, artists).slice(0, Math.ceil(limit * 0.4)));
+  // then the listener's favourites from anywhere, then anything in the same genres
+  take(scored('t.id IN (SELECT track_id FROM history WHERE user_id = ?)', [userId]));
   if (genres.length) take(scored(`t.genre IN (${genres.map(() => '?').join(',')})`, genres));
+  take(scored('1 = 1', []));
   return out;
 }

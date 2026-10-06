@@ -159,7 +159,7 @@ export async function runDj(userId: number, userName: string, history: ChatMessa
   const { say, actions } = parseReply(text);
 
   const index = buildIndex();
-  const reply: DjReply = { say: say || 'Here you go.' };
+  const reply: DjReply = { say };
   const unmatched: WantedSong[] = [];
   const resolve = (list: WantedSong[]) => {
     const ids: number[] = [];
@@ -231,6 +231,16 @@ export async function runDj(userId: number, userName: string, history: ChatMessa
     ).then((list) => list.filter((s): s is Suggestion => s !== null));
   }
   if (unmatched.length) reply.unmatched = unmatched.slice(0, 20);
+  // the model sometimes returns only an action; give the listener a line anyway
+  if (!reply.say) {
+    reply.say = reply.playlist
+      ? `Your playlist ${reply.playlist.name} is ready.`
+      : reply.play?.length
+        ? `Starting with ${reply.play[0].title} by ${reply.play[0].artist}.`
+        : reply.suggestions?.length
+          ? `A few songs you don't have yet, starting with ${reply.suggestions[0].title} by ${reply.suggestions[0].artist}.`
+          : 'Here you go.';
+  }
   return reply;
 }
 
