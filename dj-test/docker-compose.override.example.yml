@@ -1,0 +1,18 @@
+# Copy to docker-compose.override.yml (gitignored) and fill in your own values.
+services:
+  spotless:
+    environment:
+      # LM Studio on another machine (enable "Serve on Local Network" there)
+      - LMSTUDIO_URL=http://192.168.1.10:1234/v1
+    volumes:
+      # replaces the ~/Music mount with the SMB share below
+      - music:/music:ro
+
+volumes:
+  music:
+    driver: local
+    driver_opts:
+      type: cifs
+      device: //nas.local/share/Music
+      # guest access; for a password-protected share use username=...,password=... instead of guest
+      o: addr=nas.local,ro,guest,vers=3.0,uid=1000,gid=1000
