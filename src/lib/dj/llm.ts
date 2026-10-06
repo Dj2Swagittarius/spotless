@@ -94,7 +94,7 @@ export async function complete(
 ): Promise<string> {
   const p = llmProvider(cfg.llm.provider);
   const baseUrl = (cfg.llm.baseUrl || p.defaultBaseUrl).replace(/\/+$/, '');
-  const model = cfg.llm.model.trim();
+  const model = cfg.llm.model.trim() || (p.local ? await autoModel(cfg) : '');
   if (!model) throw new LlmError('No model selected. Pick one under Settings → AI DJ.');
   const key = apiKeyFor(cfg, 'llm', p.id, p.envKey);
   if (p.needsKey && !key) throw new LlmError(`${p.label} needs an API key (Settings → AI DJ).`);
@@ -187,6 +187,27 @@ async function completeAnthropic(apiKey: string, model: string, system: string, 
     if (err instanceof Anthropic.APIError) throw new LlmError(`Anthropic API error ${err.status}: ${err.message.slice(0, 300)}`);
     throw new LlmError(`Could not reach Anthropic: ${String(err).slice(0, 200)}`);
   }
+}
+
+let autoPick: { key: string; model: string; at: number } | null = null;
+
+/**
+ * No model chosen on a local server: use what it has loaded, preferring gpt-oss and
+ * skipping embedding models. Re-checked every minute so swapping models in LM Studio just works.
+ */
+export async function autoModel(cfg: DjConfig): Promise<string> {
+  const key = `${cfg.llm.provider}|${cfg.llm.baseUrl}`;
+  if (autoPick && autoPick.key === key && Date.now() - autoPick.at < 60_000) return autoPick.model;
+  let models: string[];
+  try {
+    models = (await listModels(cfg)).filter((m) => !/embed/i.test(m));
+  } catch (err) {
+    throw new LlmError(`No model selected, and the local server could not be asked for one: ${err instanceof Error ? err.message : err}`);
+  }
+  const model = models.find((m) => /gpt-oss/i.test(m)) ?? models[0];
+  if (!model) throw new LlmError('The local server has no models loaded. Load one in LM Studio (or pull one in Ollama).');
+  autoPick = { key, model, at: Date.now() };
+  return model;
 }
 
 /** Model ids the configured server offers. */

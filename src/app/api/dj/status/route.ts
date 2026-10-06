@@ -9,8 +9,9 @@ export async function GET() {
   const llm = llmProvider(cfg.llm.provider);
   return NextResponse.json({
     djName: cfg.djName,
-    ready: Boolean(cfg.llm.model),
-    llm: { label: llm.label, local: llm.local, model: cfg.llm.model },
+    // local servers can pick their loaded model on their own
+    ready: Boolean(cfg.llm.model) || llm.local,
+    llm: { label: llm.label, local: llm.local, model: cfg.llm.model || 'auto (loaded model)' },
     voice: cfg.tts.provider, // 'local' | 'openai' | 'elevenlabs' → server audio; 'browser' | 'off'
     voiceLocal: ttsProvider(cfg.tts.provider).local,
     listen: cfg.stt.provider !== 'off',

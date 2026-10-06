@@ -86,15 +86,26 @@ export async function transcribe(cfg: DjConfig, audio: Blob, filename: string): 
   const baseUrl = (cfg.stt.baseUrl || p.defaultBaseUrl).replace(/\/+$/, '');
   const key = apiKeyFor(cfg, 'stt', p.id, p.envKey);
   if (p.needsKey && !key) throw new SpeechError(`${p.label} needs an API key.`);
-  const form = new FormData();
-  form.append('file', audio, filename);
-  form.append('model', cfg.stt.model || p.defaultModel);
-  form.append('response_format', 'json');
-  const res = await call(
-    `${baseUrl}/audio/transcriptions`,
-    { method: 'POST', headers: key ? { Authorization: `Bearer ${key}` } : {}, body: form },
-    p.local ? 120_000 : 60_000
-  );
+  const model = cfg.stt.model || p.defaultModel;
+  const auth: Record<string, string> = key ? { Authorization: `Bearer ${key}` } : {};
+  const send = () => {
+    const form = new FormData();
+    form.append('file', audio, filename);
+    form.append('model', model);
+    form.append('response_format', 'json');
+    return call(`${baseUrl}/audio/transcriptions`, { method: 'POST', headers: auth, body: form }, p.local ? 120_000 : 60_000);
+  };
+  let res: Response;
+  try {
+    res = await send();
+  } catch (err) {
+    // Speaches answers 404 for a model it hasn't downloaded yet; ask it to fetch the model once, then retry
+    if (!p.local || !/HTTP 404/.test(String(err))) throw err;
+    await call(`${baseUrl}/models/${model}`, { method: 'POST', headers: auth }, 600_000).catch(() => {
+      throw err;
+    });
+    res = await send();
+  }
   const d = (await res.json().catch(() => ({}))) as { text?: string };
   return (d.text ?? '').trim();
 }

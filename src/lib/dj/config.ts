@@ -140,7 +140,7 @@ export interface DjConfig {
 const KEY = 'dj_config';
 
 export function defaultConfig(): DjConfig {
-  const llm = LLM_PROVIDERS[0];
+  const llm = LLM_PROVIDERS.find((p) => p.id === process.env.DJ_PROVIDER) ?? LLM_PROVIDERS[0];
   const tts = TTS_PROVIDERS[0];
   const stt = STT_PROVIDERS[0];
   return {
