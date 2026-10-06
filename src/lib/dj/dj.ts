@@ -95,7 +95,12 @@ export function parseReply(text: string): { say: string; actions: RawAction[] } 
         try {
           const obj = JSON.parse(cleaned.slice(start, i + 1));
           const say = typeof obj.say === 'string' ? obj.say : typeof obj.message === 'string' ? obj.message : '';
-          const actions = Array.isArray(obj.actions) ? obj.actions.filter((a: unknown) => a && typeof a === 'object') : [];
+          // small models sometimes return a bare action instead of {say, actions}
+          const actions = Array.isArray(obj.actions)
+            ? obj.actions.filter((a: unknown) => a && typeof a === 'object')
+            : typeof obj.type === 'string'
+              ? [obj]
+              : [];
           if (say || actions.length) return { say: speakable(say), actions };
         } catch {
           // fall through to plain text
@@ -113,18 +118,19 @@ const songs = (a: RawAction): WantedSong[] =>
     .slice(0, 50)
     .map((t) => ({ title: t.title.trim().slice(0, 200), artist: t.artist.trim().slice(0, 200), reason: typeof t.reason === 'string' ? t.reason.slice(0, 300) : undefined }));
 
-async function deezerLookup(s: WantedSong): Promise<Suggestion> {
+/** Look a song up on Deezer. `found: false` means Deezer answered and has no such song by that artist. */
+async function deezerLookup(s: WantedSong): Promise<{ suggestion: Suggestion; found: boolean | null }> {
   const base: Suggestion = { title: s.title, artist: s.artist, reason: s.reason ?? null, cover: null, previewUrl: null, deezerUrl: null };
   try {
     const q = encodeURIComponent(`artist:"${s.artist}" track:"${s.title}"`);
     const res = await fetch(`https://api.deezer.com/search/track?q=${q}&limit=1`, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return base;
+    if (!res.ok) return { suggestion: base, found: null };
     const d = (await res.json()) as { data?: { title: string; preview: string | null; link: string; artist: { name: string }; album: { cover_medium: string | null } }[] };
     const hit = d.data?.[0];
-    if (!hit) return base;
-    return { ...base, cover: hit.album.cover_medium, previewUrl: hit.preview || null, deezerUrl: hit.link };
+    if (!hit) return { suggestion: base, found: false };
+    return { suggestion: { ...base, cover: hit.album.cover_medium, previewUrl: hit.preview || null, deezerUrl: hit.link }, found: true };
   } catch {
-    return base;
+    return { suggestion: base, found: null }; // Deezer unreachable: can't verify either way
   }
 }
 
@@ -215,10 +221,12 @@ export async function runDj(userId: number, userName: string, history: ChatMessa
           reply.queue = [...(reply.queue ?? []), ...t];
           return null;
         }
-        const found = await deezerLookup(s);
-        // a song it tried to play but nobody can find is probably made up: drop it
-        if (!explicit.has(`${s.artist}|${s.title}`.toLowerCase()) && !found.deezerUrl) return null;
-        return found;
+        const { suggestion, found } = await deezerLookup(s);
+        // Deezer has no such song by that artist: almost always a made-up title or wrong artist
+        if (found === false) return null;
+        // a play pick we couldn't verify at all isn't worth showing; explicit suggestions are
+        if (found === null && !explicit.has(`${s.artist}|${s.title}`.toLowerCase())) return null;
+        return suggestion;
       })
     ).then((list) => list.filter((s): s is Suggestion => s !== null));
   }
