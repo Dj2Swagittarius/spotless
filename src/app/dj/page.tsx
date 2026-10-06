@@ -281,7 +281,7 @@ export default function DjPage() {
           <Link href="/settings#ai-dj" className="text-white underline">
             Settings → AI DJ
           </Link>{' '}
-          (Ollama or LM Studio on this server by default).
+          (LM Studio or Ollama on your own server by default).
         </div>
       )}
 

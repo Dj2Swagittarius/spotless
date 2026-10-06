@@ -1,0 +1,28 @@
+# Optional local voice for the AI DJ: Kokoro (DJ's speaking voice) + Speaches (Whisper, push-to-talk).
+# Runs next to the main stack:
+#   docker compose -f docker-compose.yml -f docker-compose.voice.yml up -d
+# Then in Settings → AI DJ use:
+#   Voice:     Local speech server, http://kokoro:8880/v1, model kokoro, voice am_michael
+#   Listening: Local Whisper server, http://speaches:8000/v1, model Systran/faster-whisper-small
+# NVIDIA GPU: swap the images for ghcr.io/remsky/kokoro-fastapi-gpu:latest and
+# ghcr.io/speaches-ai/speaches:latest-cuda and add a GPU reservation.
+services:
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    container_name: spotless-kokoro
+    restart: unless-stopped
+    ports:
+      - "8880:8880"
+
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    container_name: spotless-speaches
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # downloaded Whisper models survive container rebuilds
+      - speaches-models:/home/ubuntu/.cache/huggingface/hub
+
+volumes:
+  speaches-models:

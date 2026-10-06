@@ -133,7 +133,7 @@ connection and steps down when the network can't keep up:
 
 - Push-to-talk voice input through a local Whisper server
 
-- Brains: Ollama or LM Studio (default, local), any OpenAI-compatible server, or OpenAI, Anthropic, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter
+- Brains: LM Studio (default) or Ollama, both local, any OpenAI-compatible server, or OpenAI, Anthropic, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter
 
 - Voice: a local speech server such as Kokoro-FastAPI (default), on-device browser voices, or OpenAI / ElevenLabs
 
@@ -521,7 +521,7 @@ https://music.example.com/api/spotify/callback
 
 Open **Settings → AI DJ** as the admin profile. Everything defaults to servers on your own machine:
 
-1. **Brain:** run [Ollama](https://ollama.com) (`ollama pull gpt-oss:20b`) or [LM Studio](https://lmstudio.ai) (start its local server), pick it as the provider, hit **Load models**, choose one and **Test model**. gpt-oss reasons before answering, so it picks better sets but is slower; Qwen 3 or Gemma 3 answer faster on smaller GPUs. For Ollama, the context size field is sent as `num_ctx` (16k default) so the library summary fits.
+1. **Brain:** in [LM Studio](https://lmstudio.ai) (the default) download a model such as `openai/gpt-oss-20b`, open the Developer tab and start the server (enable "Serve on Local Network" when Spotless runs in Docker or on another machine). [Ollama](https://ollama.com) (`ollama pull gpt-oss:20b`) works too. Pick the provider, hit **Load models**, choose one and **Test model**. gpt-oss reasons before answering, so it picks better sets but is slower; Qwen 3 or Gemma 3 answer faster on smaller GPUs. For Ollama, the context size field is sent as `num_ctx` (16k default) so the library summary fits.
 
 2. **Voice:** run a local OpenAI-compatible speech server, for example [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI): `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest` (GPU images exist). Model `kokoro`, voice e.g. `am_michael`. **Browser voice** uses only on-device voices; **Off** keeps the DJ text-only.
 

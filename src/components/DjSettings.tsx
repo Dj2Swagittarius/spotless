@@ -185,7 +185,7 @@ export default function DjSettings() {
     <div className="space-y-6">
       <p className="text-sm text-subdued">
         A chat DJ that knows every profile’s library and listening history: starts sets, builds playlists, suggests songs you don’t own and
-        talks between songs. Defaults are local (Ollama, a local voice server and a local Whisper server) so nothing leaves this machine.
+        talks between songs. Defaults are local (LM Studio, a local voice server and a local Whisper server) so nothing leaves this machine.
         When Spotless runs in Docker, use <code className="text-white">http://host.docker.internal:PORT</code> to reach servers on the host.
       </p>
 
@@ -265,6 +265,12 @@ export default function DjSettings() {
           <p className="text-xs text-subdued">
             Good local picks: <span className="text-white">{llmP.examples.join(', ')}</span>. gpt-oss reasons before it answers, so it is smarter but
             slower; Qwen 3 and Gemma 3 answer faster on smaller GPUs.
+          </p>
+        )}
+        {llmP.id === 'lmstudio' && (
+          <p className="text-xs text-subdued">
+            In LM Studio, open the Developer tab and start the server (port 1234). If Spotless runs in Docker or on another machine, turn on
+            “Serve on Local Network” too. Load the model there, or enable just-in-time loading.
           </p>
         )}
         {hostedWarning(llmP.local, 'Your chat and a summary of your listening history')}

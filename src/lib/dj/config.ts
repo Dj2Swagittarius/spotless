@@ -2,7 +2,7 @@ import { getSetting, setSetting } from '../db';
 
 /**
  * AI DJ configuration: one server-wide setup (admin only) shared by every profile.
- * Everything defaults to local servers so nothing leaves the machine unless the
+ * Everything defaults to local servers (LM Studio first) so nothing leaves the machine unless the
  * admin explicitly picks a hosted provider.
  */
 
@@ -39,16 +39,6 @@ export interface LlmProvider {
 
 export const LLM_PROVIDERS: LlmProvider[] = [
   {
-    id: 'ollama',
-    label: 'Ollama (local)',
-    local: true,
-    kind: 'ollama',
-    defaultBaseUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
-    needsKey: false,
-    structured: 'none',
-    examples: ['gpt-oss:20b', 'gpt-oss:120b', 'qwen3:14b', 'gemma3:12b', 'mistral-small3.2'],
-  },
-  {
     id: 'lmstudio',
     label: 'LM Studio (local)',
     local: true,
@@ -57,6 +47,16 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     needsKey: false,
     structured: 'json_schema',
     examples: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3-14b', 'google/gemma-3-12b'],
+  },
+  {
+    id: 'ollama',
+    label: 'Ollama (local)',
+    local: true,
+    kind: 'ollama',
+    defaultBaseUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
+    needsKey: false,
+    structured: 'none',
+    examples: ['gpt-oss:20b', 'gpt-oss:120b', 'qwen3:14b', 'gemma3:12b', 'mistral-small3.2'],
   },
   {
     id: 'custom',
