@@ -7,6 +7,7 @@ import { scanLibrary, scanStatus } from '@/lib/scanner';
 import { listStations, createStation, updateStation, deleteStation, validStreamUrl } from '@/lib/stations';
 import { serveTrack } from '@/lib/streaming';
 import { ADMIN_USER_ID } from '@/lib/user';
+import { resolveLyrics } from '@/lib/lyrics';
 import {
   authenticate,
   subsonicResponse,
@@ -30,6 +31,8 @@ import {
 export const dynamic = 'force-dynamic';
 
 const IGNORED_ARTICLES = 'The El La Los Las Le Les';
+
+const OPEN_SUBSONIC_EXTENSIONS = [{ name: 'songLyrics', versions: [1] }];
 
 type Ctx = { req: NextRequest; user: SubUser; q: URLSearchParams };
 
@@ -237,7 +240,8 @@ type CtxWithView = Ctx & { view: string };
 const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response>> = {
   ping: (ctx) => subsonicResponse(ctx.req),
   getLicense: (ctx) => subsonicResponse(ctx.req, { license: { valid: true } }),
-  getOpenSubsonicExtensions: (ctx) => subsonicResponse(ctx.req, { openSubsonicExtensions: [] }),
+  getOpenSubsonicExtensions: (ctx) =>
+    subsonicResponse(ctx.req, { openSubsonicExtensions: OPEN_SUBSONIC_EXTENSIONS }),
 
   getMusicFolders: (ctx) =>
     subsonicResponse(ctx.req, { musicFolders: { musicFolder: [{ id: 1, name: 'Music' }] } }),
@@ -338,18 +342,60 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   download: (ctx) => streamTrack(ctx, true),
   getCoverArt: coverArt,
 
-  getLyrics: (ctx) => {
+  getLyrics: async (ctx) => {
     const artist = ctx.q.get('artist') ?? '';
     const title = ctx.q.get('title') ?? '';
+
     const row = db()
       .prepare(
-        `SELECT l.plain, l.synced FROM lyrics l JOIN tracks t ON t.id = l.track_id
+        `SELECT t.id FROM tracks t
          JOIN artists ar ON ar.id = t.artist_id
          WHERE t.title = ? COLLATE NOCASE AND ar.name = ? COLLATE NOCASE LIMIT 1`
       )
-      .get(title, artist) as { plain: string | null; synced: string | null } | undefined;
-    const text = row?.plain ?? row?.synced?.replace(/\[[\d:.]+\]/g, '').trim() ?? '';
+      .get(title, artist) as { id: number } | undefined;
+
+    if (!row) {
+      return subsonicResponse(ctx.req, { lyrics: { artist, title, value: '' } });
+    }
+
+    const lyrics = await resolveLyrics(row.id);
+    const text = lyrics?.plain ?? lyrics?.lines.map((line) => line.value).join('\n') ?? '';
+
     return subsonicResponse(ctx.req, { lyrics: { artist, title, value: text } });
+  },
+
+  getLyricsBySongId: async (ctx) => {
+    const rawId = ctx.q.get('id');
+    if (!rawId) return subsonicError(ctx.req, 10, 'id required');
+
+    const sid = parseSid(rawId);
+    if (!sid || sid.kind !== 'track') return subsonicError(ctx.req, 70, 'song not found');
+
+    const lyrics = await resolveLyrics(sid.id);
+    if (!lyrics) return subsonicError(ctx.req, 70, 'song not found');
+
+    const structuredLyrics =
+      lyrics.lines.length === 0
+        ? []
+        : [
+            {
+              displayArtist: lyrics.track.artist,
+              displayTitle: lyrics.track.title,
+              lang: 'und',
+              offset: lyrics.offset,
+              synced: lyrics.synced,
+              line: lyrics.synced
+                ? lyrics.lines.map((line) => ({
+                    start: line.start ?? 0,
+                    value: line.value,
+                  }))
+                : lyrics.lines.map((line) => ({ value: line.value })),
+            },
+          ];
+
+    return subsonicResponse(ctx.req, {
+      lyricsList: { structuredLyrics },
+    });
   },
 
   scrobble: (ctx) => {
@@ -546,16 +592,18 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
 async function handle(req: NextRequest, { params }: { params: Promise<{ view: string[] }> }) {
   const { view: parts } = await params;
   const view = (parts?.[0] ?? '').replace(/\.view$/, '');
-  const handler = HANDLERS[view];
 
-  // ping without credentials still answers (clients probe before auth), everything else requires auth
-  const user = authenticate(req);
-  if (!user) {
-    if (view === 'ping' || view === 'getOpenSubsonicExtensions')
-      return subsonicError(req, 40, 'Wrong username or password');
-    return subsonicError(req, 40, 'Wrong username or password');
+  // OpenSubsonic requires extension discovery to be publicly accessible.
+  if (view === 'getOpenSubsonicExtensions') {
+    return subsonicResponse(req, { openSubsonicExtensions: OPEN_SUBSONIC_EXTENSIONS });
   }
+
+  const handler = HANDLERS[view];
   if (!handler) return subsonicError(req, 0, `not implemented: ${view}`);
+
+  const user = authenticate(req);
+  if (!user) return subsonicError(req, 40, 'Wrong username or password');
+
   try {
     return await handler({ req, user, q: req.nextUrl.searchParams, view });
   } catch (err) {

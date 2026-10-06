@@ -9,33 +9,34 @@ import ProfilePicker from './ProfilePicker';
 import SetupWizard from './SetupWizard';
 import { useLikes } from '@/store/likes';
 
+type Gate = 'loading' | 'setup' | 'login' | 'ready';
+
 export default function Shell({ children }: { children: React.ReactNode }) {
   const loadLikes = useLikes((s) => s.load);
-  const [needsProfile, setNeedsProfile] = useState(false);
-  const [needsSetup, setNeedsSetup] = useState(false);
+  const [gate, setGate] = useState<Gate>('loading');
+
   useEffect(() => {
-    loadLikes();
-    fetch('/api/users')
+    fetch('/api/users', { cache: 'no-store' })
       .then((r) => r.json())
-      .then(async (d) => {
-        if (d.current) return;
-        // fresh install (no profiles at all) gets the wizard; otherwise just pick a profile
-        const setup = await fetch('/api/setup').then((r) => r.json()).catch(() => null);
-        if (setup && !setup.complete && setup.userCount === 0) setNeedsSetup(true);
-        else setNeedsProfile(true);
+      .then((d) => {
+        if (d.current) {
+          setGate('ready');
+          loadLikes();
+          return;
+        }
+        if ((d.users?.length ?? 0) === 0) setGate('setup');
+        else setGate('login');
       })
-      .catch(() => {});
+      .catch(() => setGate('login'));
   }, [loadLikes]);
 
-  if (needsSetup) {
-    return <SetupWizard onDone={() => location.reload()} />;
-  }
-
-  if (needsProfile) {
+  if (gate === 'loading') return <div className="h-dvh bg-black" />;
+  if (gate === 'setup') return <SetupWizard onDone={() => location.reload()} />;
+  if (gate === 'login') {
     return (
       <ProfilePicker
         onSelected={() => {
-          setNeedsProfile(false);
+          setGate('ready');
           location.reload();
         }}
       />

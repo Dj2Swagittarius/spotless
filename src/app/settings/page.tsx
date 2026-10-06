@@ -22,7 +22,53 @@ interface SpotifyStatus {
   importedAt: string | null;
   topCount: number;
   savedCount: number;
+  clientConfigured?: boolean;
 }
+
+interface SpotifyRedirectConfig {
+  customOrigin: string;
+  origin: string;
+  redirectUri: string;
+  source: 'setting' | 'environment' | 'default';
+}
+
+interface ScanStatus {
+  scanning: boolean;
+  lastScan: { at: string; added: number; removed: number; total: number } | null;
+  lastScanError: { at: string; message: string } | null;
+  autoScanIntervalMinutes: number;
+  nextAutoScanAt: string | null;
+}
+
+interface LyricsSidecarStatus {
+  enabled: boolean;
+  running: boolean;
+  lastRun: {
+    at: string;
+    total: number;
+    existing: number;
+    written: number;
+    cached: number;
+    noSyncedLyrics: number;
+    deferred: number;
+    errors: number;
+    stoppedByRateLimit: boolean;
+  } | null;
+  lastError: string | null;
+  writeRoot: string;
+}
+
+const AUTO_SCAN_OPTIONS = [
+  { value: 0, label: 'Off' },
+  { value: 5, label: 'Every 5 minutes' },
+  { value: 15, label: 'Every 15 minutes' },
+  { value: 30, label: 'Every 30 minutes' },
+  { value: 60, label: 'Every 1 hour' },
+  { value: 180, label: 'Every 3 hours' },
+  { value: 360, label: 'Every 6 hours' },
+  { value: 720, label: 'Every 12 hours' },
+  { value: 1440, label: 'Every 24 hours' },
+];
 
 interface Dislike {
   name: string;
@@ -44,9 +90,26 @@ export default function SettingsPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanInfo, setScanInfo] = useState<string>('');
+  const [scanError, setScanError] = useState<string>('');
+  const [autoScanInterval, setAutoScanInterval] = useState(0);
+  const [nextAutoScanAt, setNextAutoScanAt] = useState<string | null>(null);
+  const [scanScheduleBusy, setScanScheduleBusy] = useState(false);
+  const [scanScheduleMsg, setScanScheduleMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // automatic synced .lrc sidecars
+  const [lyricsEnabled, setLyricsEnabled] = useState(false);
+  const [lyricsBusy, setLyricsBusy] = useState(false);
+  const [lyricsInfo, setLyricsInfo] = useState('');
+  const [lyricsError, setLyricsError] = useState('');
+  const [lyricsWriteRoot, setLyricsWriteRoot] = useState('');
 
   // spotify
   const [spotify, setSpotify] = useState<SpotifyStatus | null>(null);
+  const [spotifyOrigin, setSpotifyOrigin] = useState('');
+  const [spotifyRedirectUri, setSpotifyRedirectUri] = useState('http://127.0.0.1:3000/api/spotify/callback');
+  const [spotifyRedirectSource, setSpotifyRedirectSource] = useState<SpotifyRedirectConfig['source']>('default');
+  const [spotifyRedirectMsg, setSpotifyRedirectMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [spotifyRedirectBusy, setSpotifyRedirectBusy] = useState(false);
 
   // last.fm
   const [lastfm, setLastfm] = useState<{ configured: boolean; connected: boolean; username: string | null } | null>(null);
@@ -91,15 +154,52 @@ export default function SettingsPage() {
   const loadScan = () =>
     fetch('/api/scan')
       .then((r) => r.json())
-      .then((s) => {
+      .then((s: ScanStatus) => {
         setScanning(s.scanning);
-        if (s.lastScan) setScanInfo(`Last scan: ${new Date(s.lastScan.at).toLocaleString()} — ${s.lastScan.total} tracks`);
+        setAutoScanInterval(s.autoScanIntervalMinutes ?? 0);
+        setNextAutoScanAt(s.nextAutoScanAt ?? null);
+        setScanError(s.lastScanError?.message ?? '');
+        if (s.lastScan) {
+          setScanInfo(`Last scan: ${new Date(s.lastScan.at).toLocaleString()} — ${s.lastScan.total} tracks`);
+        }
+      })
+      .catch(() => {});
+
+
+  const loadLyrics = () =>
+    fetch('/api/settings/lyrics')
+      .then(async (r) => {
+        if (!r.ok) return null;
+        return (await r.json()) as LyricsSidecarStatus;
+      })
+      .then((s) => {
+        if (!s) return;
+        setLyricsEnabled(s.enabled);
+        setLyricsBusy(s.running);
+        setLyricsWriteRoot(s.writeRoot ?? '');
+        setLyricsError(s.lastError ?? '');
+        if (s.running) {
+          setLyricsInfo('Downloading missing synchronized lyrics…');
+        } else if (s.lastRun) {
+          const rate = s.lastRun.stoppedByRateLimit ? ' — paused by LRCLIB rate limit' : '';
+          setLyricsInfo(
+            `Last lyrics run: wrote ${s.lastRun.written} .lrc, ${s.lastRun.existing} already existed, ${s.lastRun.noSyncedLyrics} had no synced lyrics, ${s.lastRun.deferred} waiting for retry${rate}`
+          );
+        }
       })
       .catch(() => {});
 
   useEffect(() => {
     fetch('/api/settings/music-dir').then((r) => r.json()).then((d) => setMusicDir(d.dir)).catch(() => {});
     fetch('/api/spotify/status').then((r) => r.json()).then(setSpotify).catch(() => {});
+    fetch('/api/settings/spotify')
+      .then((r) => r.json())
+      .then((d: SpotifyRedirectConfig) => {
+        setSpotifyOrigin(d.customOrigin ?? '');
+        setSpotifyRedirectUri(d.redirectUri ?? 'http://127.0.0.1:3000/api/spotify/callback');
+        setSpotifyRedirectSource(d.source ?? 'default');
+      })
+      .catch(() => {});
     fetch('/api/lastfm/status').then((r) => r.json()).then(setLastfm).catch(() => {});
     fetch('/api/settings/lidarr')
       .then((r) => r.json())
@@ -113,6 +213,7 @@ export default function SettingsPage() {
     fetch('/api/users/app-password').then((r) => r.json()).then((d) => d.username && setAppCred(d)).catch(() => {});
     loadScan();
     loadArt();
+    loadLyrics();
     try {
       setCrossfade(Number(localStorage.getItem('crossfade') ?? 0) || 0);
       setQuality(loadQuality());
@@ -120,6 +221,15 @@ export default function SettingsPage() {
       // ignore
     }
     setEq(loadEq());
+
+    // Keep automatic scans, errors and the next scheduled run visible while
+    // the Settings page stays open.
+    const scanPoll = setInterval(() => {
+      loadScan();
+      loadArt();
+      loadLyrics();
+    }, 5000);
+    return () => clearInterval(scanPoll);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -161,10 +271,21 @@ export default function SettingsPage() {
       .then((r) => r.json())
       .then((s) => {
         setArtBusy(s.running);
-        if (s.lastRun)
+        if (s.running && s.progress) {
+          const phase =
+            s.progress.phase === 'albums-local'
+              ? 'checking local album art'
+              : s.progress.phase === 'albums-remote'
+                ? 'fetching album art'
+                : 'fetching artist art';
+          setArtInfo(`Artwork: ${phase} ${s.progress.done}/${s.progress.total}`);
+        } else if (s.lastError) {
+          setArtInfo(`Artwork error: ${s.lastError}`);
+        } else if (s.lastRun) {
           setArtInfo(
-            `Last run: fixed ${s.lastRun.albumsFixed} album + ${s.lastRun.artistsFixed} artist images, ${s.lastRun.albumsMissing} albums still without art`
+            `Last artwork run: fixed ${s.lastRun.albumsFixed} album + ${s.lastRun.artistsFixed} artist images, ${s.lastRun.albumsMissing} albums still without art, ${s.lastRun.errors ?? 0} errors`
           );
+        }
       })
       .catch(() => {});
 
@@ -192,6 +313,69 @@ export default function SettingsPage() {
         setScanning(false);
       }
     }, 1500);
+  };
+
+  const saveAutoScanInterval = async (minutes: number) => {
+    setScanScheduleBusy(true);
+    setScanScheduleMsg(null);
+
+    const res = await fetch('/api/scan', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intervalMinutes: minutes }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setScanScheduleBusy(false);
+
+    if (!res.ok) {
+      setScanScheduleMsg({ ok: false, text: data.error || 'Could not save automatic refresh interval' });
+      loadScan();
+      return;
+    }
+
+    setAutoScanInterval(data.autoScanIntervalMinutes ?? minutes);
+    setNextAutoScanAt(data.nextAutoScanAt ?? null);
+    setScanScheduleMsg({
+      ok: true,
+      text:
+        minutes === 0
+          ? 'Automatic library refresh disabled.'
+          : `Automatic library refresh set to ${AUTO_SCAN_OPTIONS.find((o) => o.value === minutes)?.label.toLowerCase() ?? `${minutes} minutes`}.`,
+    });
+  };
+
+  const saveLyricsEnabled = async (enabled: boolean) => {
+    setLyricsError('');
+    const res = await fetch('/api/settings/lyrics', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setLyricsError(data.error || 'Could not save synchronized lyrics setting');
+      return;
+    }
+    setLyricsEnabled(Boolean(data.enabled));
+    setLyricsWriteRoot(data.writeRoot ?? lyricsWriteRoot);
+    if (enabled) {
+      setLyricsInfo('Enabled — every successful library scan will trigger a missing synced .lrc check.');
+    } else {
+      setLyricsInfo('Automatic synced .lrc download disabled. Existing lyric files are untouched.');
+    }
+  };
+
+  const fetchMissingLyrics = async () => {
+    setLyricsBusy(true);
+    setLyricsError('');
+    const res = await fetch('/api/settings/lyrics', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setLyricsBusy(false);
+      setLyricsError(data.error || 'Could not start synchronized lyrics download');
+      return;
+    }
+    setLyricsInfo(data.reason || 'Downloading missing synchronized lyrics…');
   };
 
   const saveLidarr = async () => {
@@ -231,6 +415,44 @@ export default function SettingsPage() {
     await fetch('/api/spotify/status', { method: 'DELETE' });
     const s = await fetch('/api/spotify/status').then((r) => r.json());
     setSpotify(s);
+  };
+
+  const applySpotifyRedirectConfig = (d: SpotifyRedirectConfig) => {
+    setSpotifyOrigin(d.customOrigin ?? '');
+    setSpotifyRedirectUri(d.redirectUri ?? 'http://127.0.0.1:3000/api/spotify/callback');
+    setSpotifyRedirectSource(d.source ?? 'default');
+  };
+
+  const saveSpotifyRedirect = async () => {
+    setSpotifyRedirectBusy(true);
+    setSpotifyRedirectMsg(null);
+    const res = await fetch('/api/settings/spotify', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin: spotifyOrigin }),
+    });
+    const data = await res.json();
+    setSpotifyRedirectBusy(false);
+    if (!res.ok) {
+      setSpotifyRedirectMsg({ ok: false, text: data.error || 'Could not save Spotify callback domain' });
+      return;
+    }
+    applySpotifyRedirectConfig(data);
+    setSpotifyRedirectMsg({ ok: true, text: 'Spotify callback setting saved.' });
+  };
+
+  const resetSpotifyRedirect = async () => {
+    setSpotifyRedirectBusy(true);
+    setSpotifyRedirectMsg(null);
+    const res = await fetch('/api/settings/spotify', { method: 'DELETE' });
+    const data = await res.json();
+    setSpotifyRedirectBusy(false);
+    if (!res.ok) {
+      setSpotifyRedirectMsg({ ok: false, text: data.error || 'Could not reset Spotify callback domain' });
+      return;
+    }
+    applySpotifyRedirectConfig(data);
+    setSpotifyRedirectMsg({ ok: true, text: 'Custom callback domain cleared.' });
   };
 
   const updateEq = (s: EqState) => {
@@ -379,7 +601,66 @@ export default function SettingsPage() {
           <div className="mb-3 text-sm text-subdued">
             Folder: <span className="text-white">{musicDir || '…'}</span>
           </div>
-          {scanInfo && <div className="mb-3 text-sm text-subdued">{scanInfo}</div>}
+          {scanInfo && <div className="mb-2 text-sm text-subdued">{scanInfo}</div>}
+          {scanError && (
+            <div className="mb-3 rounded bg-red-950/40 px-3 py-2 text-sm text-red-300">
+              Last scan failed: {scanError}
+            </div>
+          )}
+
+          <div className="mb-4 max-w-sm">
+            <label className="mb-1 block text-sm font-medium">Automatic library refresh</label>
+            <select
+              className={input}
+              value={autoScanInterval}
+              onChange={(e) => saveAutoScanInterval(Number(e.target.value))}
+              disabled={scanScheduleBusy}
+            >
+              {AUTO_SCAN_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-subdued">
+              {autoScanInterval === 0
+                ? 'Off — Spotless still scans once at server startup and whenever you click Rescan now.'
+                : nextAutoScanAt
+                  ? `Next automatic scan: ${new Date(nextAutoScanAt).toLocaleString()}. A manual scan resets this timer.`
+                  : 'Automatic refresh is enabled; the next run will be scheduled after the current scan finishes.'}
+            </p>
+            {scanScheduleMsg && (
+              <p className={`mt-2 text-xs ${scanScheduleMsg.ok ? 'text-accent' : 'text-red-400'}`}>
+                {scanScheduleMsg.text}
+              </p>
+            )}
+          </div>
+
+          <div className="mb-4 rounded-lg bg-highlight/50 p-3">
+            <label className="flex items-center justify-between gap-4">
+              <span>
+                <span className="block text-sm font-medium">Automatic synced lyrics sidecars</span>
+                <span className="mt-1 block text-xs text-subdued">
+                  After every successful library scan, fetch only synchronized lyrics from LRCLIB and save missing
+                  same-name <code>.lrc</code> files beside the music. Existing lyric files are never overwritten.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={lyricsEnabled}
+                onChange={(e) => saveLyricsEnabled(e.target.checked)}
+                className="h-5 w-5 shrink-0 accent-green-500"
+              />
+            </label>
+            {lyricsWriteRoot && (
+              <p className="mt-2 text-xs text-subdued">
+                Lyrics write path: <span className="text-white">{lyricsWriteRoot}</span>
+              </p>
+            )}
+            {lyricsInfo && <p className="mt-2 text-xs text-subdued">{lyricsInfo}</p>}
+            {lyricsError && <p className="mt-2 text-xs text-red-400">Lyrics error: {lyricsError}</p>}
+          </div>
+
           <div className="mb-3 flex flex-wrap gap-2">
             <button className={btn} onClick={() => setPickerOpen(true)}>Change folder</button>
             <button className={btn} onClick={rescan} disabled={scanning}>
@@ -387,6 +668,9 @@ export default function SettingsPage() {
             </button>
             <button className={btn} onClick={fetchArt} disabled={artBusy}>
               {artBusy ? 'Fetching art…' : 'Fetch missing artwork'}
+            </button>
+            <button className={btn} onClick={fetchMissingLyrics} disabled={lyricsBusy}>
+              {lyricsBusy ? 'Fetching synced lyrics…' : 'Fetch missing synced lyrics'}
             </button>
           </div>
           {artInfo && <div className="text-sm text-subdued">{artInfo}</div>}
@@ -549,6 +833,54 @@ export default function SettingsPage() {
               Connect Spotify
             </a>
           </>
+        )}
+
+        {me?.isAdmin && (
+          <div className="mt-5 border-t border-highlight pt-4">
+            <label className="mb-1 block text-sm font-medium">Public domain for Spotify OAuth</label>
+            <p className="mb-3 text-sm text-subdued">
+              Optional. For a reverse proxy, enter only your public domain, for example{' '}
+              <span className="text-white">music.example.com</span>. Spotless adds{' '}
+              <span className="text-white">/api/spotify/callback</span> automatically. Leave this blank to use{' '}
+              <span className="text-white">SPOTIFY_REDIRECT_URI</span> when set, otherwise the local loopback default.
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                className={input}
+                value={spotifyOrigin}
+                onChange={(e) => setSpotifyOrigin(e.target.value)}
+                placeholder="music.example.com"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <button className={btn} onClick={saveSpotifyRedirect} disabled={spotifyRedirectBusy}>
+                {spotifyRedirectBusy ? 'Saving…' : 'Save'}
+              </button>
+              {spotifyRedirectSource === 'setting' && (
+                <button className={btn} onClick={resetSpotifyRedirect} disabled={spotifyRedirectBusy}>
+                  Use default
+                </button>
+              )}
+            </div>
+            <div className="mt-2 rounded bg-base px-3 py-2 text-xs text-subdued">
+              Spotify Redirect URI:{' '}
+              <span className="break-all font-mono text-white">{spotifyRedirectUri}</span>
+            </div>
+            <p className="mt-2 text-xs text-subdued">
+              Add that exact URI to your Spotify app's Redirect URIs before connecting. Public domains must use HTTPS.
+            </p>
+            {spotifyRedirectSource === 'environment' && !spotifyOrigin && (
+              <p className="mt-2 text-xs text-subdued">
+                Currently using the SPOTIFY_REDIRECT_URI environment variable. Saving a domain here overrides it.
+              </p>
+            )}
+            {spotifyRedirectMsg && (
+              <div className={`mt-3 rounded px-3 py-2 text-sm ${spotifyRedirectMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+                {spotifyRedirectMsg.text}
+              </div>
+            )}
+          </div>
         )}
       </Section>
 

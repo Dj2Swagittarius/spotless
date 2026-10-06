@@ -5,3 +5,4 @@ data
 Dockerfile
 docker-compose.yml
 README.md
+docker-compose.test.yml

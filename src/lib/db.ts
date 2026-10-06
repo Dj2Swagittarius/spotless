@@ -5,13 +5,13 @@ import path from 'path';
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
 
 let db: Database.Database | null = null;
-
 export function getDb(): Database.Database {
   if (db) return db;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.mkdirSync(path.join(DATA_DIR, 'art'), { recursive: true });
   db = new Database(path.join(DATA_DIR, 'library.db'));
   db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE IF NOT EXISTS artists (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +81,24 @@ export function getDb(): Database.Database {
   if (!hasColumn(db, 'tracks', 'gain')) db.exec('ALTER TABLE tracks ADD COLUMN gain REAL');
   // per-profile credential for Subsonic mobile clients (generated on demand)
   if (!hasColumn(db, 'users', 'app_password')) db.exec('ALTER TABLE users ADD COLUMN app_password TEXT');
+  // web authentication: hashes only, never plaintext web passwords
+  if (!hasColumn(db, 'users', 'password_hash')) db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT');
   db.exec(`
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      last_seen_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry ON auth_sessions(expires_at);
+    CREATE TABLE IF NOT EXISTS auth_login_attempts (
+      key TEXT PRIMARY KEY,
+      failures INTEGER NOT NULL DEFAULT 0,
+      window_started_at INTEGER NOT NULL,
+      blocked_until INTEGER NOT NULL DEFAULT 0
+    );
     CREATE TABLE IF NOT EXISTS collections (
       user_id INTEGER NOT NULL,
       artist_id INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
@@ -118,12 +135,13 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_placeholders_playlist ON playlist_placeholders(playlist_id);
   `);
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').run(now);
+  db.prepare('DELETE FROM auth_login_attempts WHERE window_started_at < ?').run(now - 86400);
   return db;
 }
-
 const hasColumn = (d: Database.Database, table: string, col: string) =>
   (d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === col);
-
 /** One-time migration to per-user data. Existing likes/history/playlists move to user 1. */
 function migrateMultiUser(d: Database.Database) {
   d.exec(`
@@ -135,19 +153,16 @@ function migrateMultiUser(d: Database.Database) {
     );
   `);
   if (hasColumn(d, 'history', 'user_id')) return; // already migrated
-
   const migrate = d.transaction(() => {
     // only pre-existing single-user data needs an owner; fresh installs create
-    // their first profile (= user 1 = admin) through the Who's-listening picker
+    // their first profile (= user 1 = admin) through the setup wizard
     const legacy =
       (d.prepare('SELECT COUNT(*) AS n FROM history').get() as { n: number }).n > 0 ||
       (d.prepare('SELECT COUNT(*) AS n FROM likes').get() as { n: number }).n > 0 ||
       (d.prepare('SELECT COUNT(*) AS n FROM playlists').get() as { n: number }).n > 0;
     if (legacy) d.prepare("INSERT OR IGNORE INTO users (id, name, color) VALUES (1, 'Me', '#1ed760')").run();
-
     d.exec('ALTER TABLE history ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1');
     d.exec('ALTER TABLE playlists ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1');
-
     // likes: PK becomes (user_id, track_id)
     d.exec(`
       CREATE TABLE likes_new (
@@ -160,7 +175,6 @@ function migrateMultiUser(d: Database.Database) {
       DROP TABLE likes;
       ALTER TABLE likes_new RENAME TO likes;
     `);
-
     // dislikes: PK becomes (user_id, name)
     d.exec(`
       CREATE TABLE discover_dislikes_new (
@@ -173,7 +187,6 @@ function migrateMultiUser(d: Database.Database) {
       DROP TABLE discover_dislikes;
       ALTER TABLE discover_dislikes_new RENAME TO discover_dislikes;
     `);
-
     // per-user settings keys
     for (const key of ['spotify_tokens', 'spotify_taste', 'discover_cache']) {
       d.prepare('UPDATE OR IGNORE settings SET key = ? WHERE key = ?').run(`${key}:1`, key);
@@ -186,7 +199,6 @@ function migrateMultiUser(d: Database.Database) {
 export function artDir(): string {
   return path.join(DATA_DIR, 'art');
 }
-
 export function getSetting(key: string): string | null {
   const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   return row?.value ?? null;
@@ -197,7 +209,6 @@ export function setSetting(key: string, value: string): void {
     .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
     .run(key, value);
 }
-
 export function delSetting(key: string): void {
   getDb().prepare('DELETE FROM settings WHERE key = ?').run(key);
 }

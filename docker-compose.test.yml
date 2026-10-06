@@ -1,0 +1,21 @@
+services:
+  spotless-test:
+    build:
+      context: .
+    container_name: spotless-test
+    restart: "no"
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      MUSIC_DIR: /music
+      MUSIC_WRITE_DIR: /music-write
+      DATA_DIR: /data
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+
+    volumes:
+      - ./test-env/music:/music:ro
+      - ./test-env/music:/music-write:rw
+      - ./test-env/data:/data
