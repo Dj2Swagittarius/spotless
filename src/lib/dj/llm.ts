@@ -78,9 +78,11 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
   }
 }
 
+// a server that can't handle the structured-output field answers with an HTTP error
+// (4xx, or 500 from some llama.cpp builds): retry plain. Auth, rate limits and timeouts are final.
 const isClientError = (err: unknown) => {
   const s = (err as { status?: number }).status;
-  return typeof s === 'number' && s >= 400 && s < 500 && s !== 401 && s !== 403 && s !== 429;
+  return typeof s === 'number' && s >= 400 && s !== 401 && s !== 403 && s !== 429 && s !== 504;
 };
 
 /** One chat completion. Returns the assistant's text (reasoning stripped). */
