@@ -119,6 +119,24 @@ connection and steps down when the network can't keep up:
 
 - Existing passwordless installations have a one-time migration path: profile 1 can claim the first admin password only while no web password exists anywhere in the database
 
+**AI DJ** (local by default; nothing leaves your server unless you pick a hosted provider)
+
+- Chat with a music-nerd DJ that knows each profile's library, play history, likes, Spotify taste and Discover picks
+
+- "Start my DJ" builds a set from your library and plays it; ask for a mood, an artist, a genre, or a playlist and it does it
+
+- Creates playlists for you; songs you don't own are kept as placeholders that fill in after a future scan
+
+- Suggests songs you don't have yet, with Deezer previews and a one-click Lidarr add
+
+- Talks: speaks its replies and introduces songs between tracks (music ducks while it talks), like a radio host
+
+- Push-to-talk voice input through a local Whisper server
+
+- Brains: LM Studio (default) or Ollama, both local, any OpenAI-compatible server, or OpenAI, Anthropic, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter
+
+- Voice: a local speech server such as Kokoro-FastAPI (default), on-device browser voices, or OpenAI / ElevenLabs
+
 **Discovery** (no API keys needed — Deezer + Apple RSS public endpoints)
 
 - Per-profile artist suggestions based on listening history, with "not interested" dismissals
@@ -238,6 +256,10 @@ docker compose up -d --build
 | `FFMPEG_PATH` | `ffmpeg` | Path to ffmpeg (bundled in the Docker image) |
 | `LIDARR_WEBHOOK_SECRET` | *(none)* | Optional; if set, the Lidarr webhook requires `?token=<secret>` |
 | `AUTH_SECURE_COOKIE` | *(auto)* | Force the web session cookie to `Secure`; use `true` behind HTTPS if proxy detection is unavailable |
+| `OLLAMA_URL` / `LMSTUDIO_URL` | `http://localhost:11434` / `http://localhost:1234/v1` | AI DJ: default local LLM server URLs |
+| `TTS_URL` / `STT_URL` | `http://localhost:8880/v1` / `http://localhost:8000/v1` | AI DJ: default local voice and speech recognition servers |
+| `DJ_MODEL` | *(none)* | AI DJ: default model id |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ELEVENLABS_API_KEY` | *(none)* | AI DJ: optional keys for hosted providers (keys saved in Settings take priority) |
 | `AUTH_MIN_PASSWORD_LENGTH` | `4` | Minimum web password length. `4` allows a PIN on a home network; raise it (e.g. `12`) if Spotless is reachable from the internet |
 | `TRUST_PROXY` | *(off)* | Number of reverse-proxy hops in front of Spotless (usually `1`). Lets login throttling read the client IP from `X-Forwarded-For`; leave unset when clients connect directly, because the header can be forged |
 
@@ -494,6 +516,22 @@ https://music.example.com/api/spotify/callback
 
 3. Each profile then clicks **Connect Last.fm** on the same page to link its own account
 
+
+### AI DJ
+
+Open **Settings → AI DJ** as the admin profile. Everything defaults to servers on your own machine:
+
+1. **Brain:** in [LM Studio](https://lmstudio.ai) (the default) download a model such as `openai/gpt-oss-20b`, open the Developer tab and start the server (enable "Serve on Local Network" when Spotless runs in Docker or on another machine). [Ollama](https://ollama.com) (`ollama pull gpt-oss:20b`) works too. Pick the provider, hit **Load models**, choose one and **Test model**. gpt-oss reasons before answering, so it picks better sets but is slower; Qwen 3 or Gemma 3 answer faster on smaller GPUs. For Ollama, the context size field is sent as `num_ctx` (16k default) so the library summary fits.
+
+2. **Voice:** run a local OpenAI-compatible speech server, for example [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI): `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest` (GPU images exist). Model `kokoro`, voice e.g. `am_michael`. **Browser voice** uses only on-device voices; **Off** keeps the DJ text-only.
+
+3. **Listening:** push-to-talk needs a local Whisper server with an OpenAI-style `/v1/audio/transcriptions` endpoint, such as [Speaches](https://github.com/speaches-ai/speaches) (`Systran/faster-whisper-small`). Some servers need the model downloaded first; see their docs. Browsers only allow the mic over HTTPS or on localhost. The browser's built-in speech recognition is not used because Chrome sends that audio to Google.
+
+4. Hosted providers (OpenAI, Anthropic, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter, ElevenLabs) are optional. The settings page warns when a choice sends data off your server. API keys are stored in the database and never sent back to the browser.
+
+When Spotless runs in Docker, `localhost` is the container itself: use `http://host.docker.internal:PORT` (the supplied `docker-compose.yml` maps it to the host).
+
+The DJ only plays songs it can match to your library. Picks it can't match are shown as suggestions only when Deezer confirms the song exists. Each profile's chat history is kept in that browser only.
 
 ## Local development
 

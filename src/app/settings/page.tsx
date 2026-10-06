@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import FolderPicker from '@/components/FolderPicker';
+import DjSettings from '@/components/DjSettings';
 import { XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
 import { loadEq, saveEq, EQ_PRESETS, EQ_FREQS, EQ_MIN, EQ_MAX, type EqState } from '@/lib/eq';
@@ -930,6 +931,14 @@ export default function SettingsPage() {
           </>
         )}
       </Section>
+
+      {me?.isAdmin && (
+        <div id="ai-dj">
+          <Section title="AI DJ">
+            <DjSettings />
+          </Section>
+        </div>
+      )}
 
       {me?.isAdmin && (
         <Section title="Lidarr">

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { HomeIcon, SearchIcon, LibraryIcon, MusicIcon } from './Icons';
+import { HomeIcon, SearchIcon, LibraryIcon, MusicIcon, DjIcon } from './Icons';
 
 export default function MobileNav() {
   const pathname = usePathname();
@@ -23,6 +23,9 @@ export default function MobileNav() {
       </Link>
       <Link href="/search" className={cls(pathname === '/search')}>
         <SearchIcon size={24} /> Search
+      </Link>
+      <Link href="/dj" className={cls(pathname === '/dj')}>
+        <DjIcon size={24} /> DJ
       </Link>
       <Link href="/discover" className={cls(pathname === '/discover')}>
         <MusicIcon size={24} /> Discover
