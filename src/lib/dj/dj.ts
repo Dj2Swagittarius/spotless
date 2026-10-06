@@ -3,7 +3,7 @@ import { nextPosition } from '../playlistMatch';
 import type { Track } from '../types';
 import { getDjConfig } from './config';
 import { complete, type ChatMessage } from './llm';
-import { artistTracks, buildIndex, buildListenerProfile, genreTracks, tracksByIds, type ListenerContext } from './library';
+import { artistTracks, buildIndex, buildListenerProfile, genreTracks, similarTracks, tracksByIds, type ListenerContext } from './library';
 
 export interface WantedSong {
   title: string;
@@ -63,6 +63,15 @@ Action shapes:
 {"type":"suggest","tracks":[{"title":"...","artist":"...","reason":"..."}]}`;
 }
 
+/** The "say" text is read aloud: drop markdown and links models add anyway. */
+export function speakable(text: string): string {
+  return text
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[*_`#]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Pull the first JSON object out of a model reply; models often wrap it in prose or code fences. */
 export function parseReply(text: string): { say: string; actions: RawAction[] } {
   const cleaned = text.replace(/```(?:json)?/gi, '').trim();
@@ -87,7 +96,7 @@ export function parseReply(text: string): { say: string; actions: RawAction[] } 
           const obj = JSON.parse(cleaned.slice(start, i + 1));
           const say = typeof obj.say === 'string' ? obj.say : typeof obj.message === 'string' ? obj.message : '';
           const actions = Array.isArray(obj.actions) ? obj.actions.filter((a: unknown) => a && typeof a === 'object') : [];
-          if (say || actions.length) return { say: say.trim(), actions };
+          if (say || actions.length) return { say: speakable(say), actions };
         } catch {
           // fall through to plain text
         }
@@ -95,7 +104,7 @@ export function parseReply(text: string): { say: string; actions: RawAction[] } 
       }
     }
   }
-  return { say: cleaned, actions: [] };
+  return { say: speakable(cleaned), actions: [] };
 }
 
 const songs = (a: RawAction): WantedSong[] =>
@@ -184,6 +193,13 @@ export async function runDj(userId: number, userName: string, history: ChatMessa
     } else if (type === 'suggest') {
       suggestions.push(...songs(a));
     }
+  }
+
+  // small local models often pick only a song or two; a DJ set should keep going
+  const SET_SIZE = 20;
+  if (reply.play && reply.play.length < 10) {
+    const extra = similarTracks(userId, reply.play.map((t) => t.id), SET_SIZE - reply.play.length);
+    reply.play = [...reply.play, ...tracksByIds(extra)];
   }
 
   // songs it wanted to play but the library lacks are worth surfacing as suggestions

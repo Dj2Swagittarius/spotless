@@ -223,3 +223,36 @@ export function genreTracks(genre: string, limit = 40): number[] {
     (r) => r.id
   );
 }
+
+/**
+ * Library tracks that flow from the seeds: same artists and genres first, the
+ * listener's most played among them first, a little randomness for variety.
+ * Used to turn a short pick from a small model into a full DJ set.
+ */
+export function similarTracks(userId: number, seedIds: number[], limit: number): number[] {
+  if (!seedIds.length || limit <= 0) return [];
+  const marks = seedIds.map(() => '?').join(',');
+  const seeds = rows<{ artist_id: number; genre: string | null }>(`SELECT artist_id, genre FROM tracks WHERE id IN (${marks})`, ...seedIds);
+  const artists = [...new Set(seeds.map((s) => s.artist_id))];
+  const genres = [...new Set(seeds.map((s) => s.genre).filter((g): g is string => Boolean(g)))];
+  const out: number[] = [];
+  const seen = new Set(seedIds);
+  const take = (list: { id: number }[]) => {
+    for (const r of list) if (!seen.has(r.id) && out.length < limit) (seen.add(r.id), out.push(r.id));
+  };
+  const scored = (where: string, params: unknown[]) =>
+    rows<{ id: number }>(
+      `SELECT t.id FROM tracks t
+       LEFT JOIN (SELECT track_id, COUNT(*) AS plays FROM history WHERE user_id = ? GROUP BY track_id) h ON h.track_id = t.id
+       WHERE ${where}
+       ORDER BY COALESCE(h.plays, 0) * 0.5 + ABS(RANDOM() % 10) DESC LIMIT ?`,
+      userId,
+      ...params,
+      limit * 3
+    );
+  // alternate genre neighbours and the seeds' own artists so a set doesn't become one artist
+  if (genres.length) take(scored(`t.genre IN (${genres.map(() => '?').join(',')}) AND t.artist_id NOT IN (${artists.map(() => '?').join(',')})`, [...genres, ...artists]).slice(0, Math.ceil(limit * 0.6)));
+  take(scored(`t.artist_id IN (${artists.map(() => '?').join(',')})`, artists));
+  if (genres.length) take(scored(`t.genre IN (${genres.map(() => '?').join(',')})`, genres));
+  return out;
+}
