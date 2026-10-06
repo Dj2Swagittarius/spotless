@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DjIcon, MicIcon, PauseIcon, PlayIcon, SendIcon, XIcon } from '@/components/Icons';
+import { DjIcon, MicIcon, PauseIcon, PlayIcon, PlusIcon, SendIcon, XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
 import type { Track } from '@/lib/types';
 import { seguesEnabled, setSeguesEnabled, setVoiceEnabled, speak, stopSpeaking, voiceEnabled } from '@/lib/client/djVoice';
@@ -23,7 +23,14 @@ interface Msg {
   queue?: Track[];
   playlist?: { id: number; name: string; added: number; missing: number };
   suggestions?: Suggestion[];
+  /** playlists the listener saved from this reply's track cards, keyed by card */
+  saved?: Partial<Record<'play' | 'queue', SavedPlaylist>>;
   error?: boolean;
+}
+
+interface SavedPlaylist {
+  id: number;
+  name: string;
 }
 
 interface Status {
@@ -217,6 +224,16 @@ export default function DjPage() {
     setGot((g) => ({ ...g, [k]: res.ok ? (d.status === 'requested' ? 'Requested' : 'Added to Lidarr') : `Failed: ${d.error ?? res.status}` }));
   };
 
+  const markSaved = (i: number, card: 'play' | 'queue', pl: SavedPlaylist) =>
+    setMessages((ms) => ms.map((m, j) => (j === i ? { ...m, saved: { ...m.saved, [card]: pl } } : m)));
+
+  // name a saved set after what was asked for, or after the date for a plain "Start my DJ"
+  const playlistName = (i: number) => {
+    const asked = messages[i - 1]?.role === 'user' ? messages[i - 1].content.trim() : '';
+    const day = new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    return asked && asked !== QUICK[0] ? asked.slice(0, 60) : `${djName} set, ${day}`;
+  };
+
   const clear = () => {
     stopSpeaking();
     setMessages([]);
@@ -313,8 +330,25 @@ export default function DjPage() {
                   </button>
                 )}
               </div>
-              {m.play && m.play.length > 0 && <TrackCard title={`Playing ${m.play.length} song${m.play.length === 1 ? '' : 's'}`} tracks={m.play} onPlay={() => playDj(m.play!)} />}
-              {m.queue && m.queue.length > 0 && <TrackCard title={`Queued ${m.queue.length} song${m.queue.length === 1 ? '' : 's'}`} tracks={m.queue} />}
+              {m.play && m.play.length > 0 && (
+                <TrackCard
+                  title={`Playing ${m.play.length} song${m.play.length === 1 ? '' : 's'}`}
+                  tracks={m.play}
+                  onPlay={() => playDj(m.play!)}
+                  defaultName={playlistName(i)}
+                  saved={m.saved?.play}
+                  onSaved={(pl) => markSaved(i, 'play', pl)}
+                />
+              )}
+              {m.queue && m.queue.length > 0 && (
+                <TrackCard
+                  title={`Queued ${m.queue.length} song${m.queue.length === 1 ? '' : 's'}`}
+                  tracks={m.queue}
+                  defaultName={playlistName(i)}
+                  saved={m.saved?.queue}
+                  onSaved={(pl) => markSaved(i, 'queue', pl)}
+                />
+              )}
               {m.playlist && (
                 <Link href={`/playlist/${m.playlist.id}`} className="block max-w-[90%] rounded-lg bg-highlight px-4 py-3 text-sm hover:bg-press">
                   <div className="font-bold">New playlist: {m.playlist.name}</div>
@@ -440,19 +474,111 @@ export default function DjPage() {
   );
 }
 
-function TrackCard({ title, tracks, onPlay }: { title: string; tracks: Track[]; onPlay?: () => void }) {
+function TrackCard({
+  title,
+  tracks,
+  onPlay,
+  defaultName,
+  saved,
+  onSaved,
+}: {
+  title: string;
+  tracks: Track[];
+  onPlay?: () => void;
+  defaultName: string;
+  saved?: SavedPlaylist;
+  onSaved: (pl: SavedPlaylist) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState(defaultName);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const shown = open ? tracks : tracks.slice(0, 5);
+
+  const save = async () => {
+    const n = name.trim();
+    if (!n || saving) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      const res = await fetch('/api/playlists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: n, description: 'Saved from the AI DJ' }),
+      });
+      const { id } = await res.json();
+      if (!res.ok || !id) throw new Error();
+      const added = await fetch(`/api/playlists/${id}/tracks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackIds: tracks.map((t) => t.id).filter((tid) => tid > 0) }),
+      });
+      if (!added.ok) throw new Error();
+      window.dispatchEvent(new Event('playlists-changed')); // sidebar refreshes its list
+      setNaming(false);
+      onSaved({ id, name: n });
+    } catch {
+      setSaveError('Could not save the playlist.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="max-w-[90%] rounded-lg bg-highlight p-3">
       <div className="mb-2 flex items-center gap-2">
         <div className="flex-1 text-sm font-bold">{title}</div>
+        {saved ? (
+          <Link href={`/playlist/${saved.id}`} className="truncate text-xs text-accent hover:underline" title={saved.name}>
+            Saved as {saved.name}
+          </Link>
+        ) : (
+          !naming && (
+            <button
+              onClick={() => {
+                setName(defaultName);
+                setNaming(true);
+              }}
+              className="flex items-center gap-1 rounded-full bg-press px-3 py-1 text-xs hover:text-white"
+              title="Save these songs as a playlist"
+            >
+              <PlusIcon size={12} /> Save as playlist
+            </button>
+          )
+        )}
         {onPlay && (
           <button onClick={onPlay} className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-black" aria-label="Play again">
             <PlayIcon size={14} />
           </button>
         )}
       </div>
+      {naming && !saved && (
+        <form
+          className="mb-2 flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={100}
+            placeholder="Playlist name"
+            aria-label="Playlist name"
+            className="min-w-0 flex-1 rounded bg-press px-2 py-1 text-xs text-white outline-none focus:shadow-insetBorder"
+          />
+          <button type="submit" disabled={saving || !name.trim()} className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-black disabled:opacity-40">
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button type="button" onClick={() => setNaming(false)} className="text-subdued hover:text-white" aria-label="Cancel">
+            <XIcon size={14} />
+          </button>
+        </form>
+      )}
+      {saveError && <div className="mb-2 text-xs text-negative">{saveError}</div>}
       <ol className="space-y-1">
         {shown.map((t, i) => (
           <li key={`${t.id}-${i}`} className="flex items-center gap-2 text-xs">
