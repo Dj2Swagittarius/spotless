@@ -1,6 +1,7 @@
 'use client';
 
-import { use, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import TrackList from '@/components/TrackList';
 import { CardGrid, AlbumCard, ArtistCard } from '@/components/Cards';
 import { SearchIcon, PlayIcon, PauseIcon, MicIcon } from '@/components/Icons';
@@ -41,8 +42,18 @@ interface DzResults {
   tracks: DzTrack[];
 }
 
-export default function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const { q: urlQ } = use(searchParams);
+export default function SearchPage() {
+  // useSearchParams needs a Suspense boundary so the page can still prerender
+  return (
+    <Suspense>
+      <Search />
+    </Suspense>
+  );
+}
+
+function Search() {
+  // the searchParams page prop came back empty, so ?q= from the top bar never reached the page
+  const urlQ = useSearchParams().get('q') ?? undefined;
   const [q, setQ] = useState(urlQ ?? '');
   const [results, setResults] = useState<Results | null>(null);
   const [dz, setDz] = useState<DzResults | null>(null);

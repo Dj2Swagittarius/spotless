@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DjIcon, MicIcon, PauseIcon, PlayIcon, PlusIcon, SendIcon, XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
 import type { Track } from '@/lib/types';
-import { seguesEnabled, setSeguesEnabled, setVoiceEnabled, speak, stopSpeaking, voiceEnabled } from '@/lib/client/djVoice';
+import { onSpeakingChange, seguesEnabled, setSeguesEnabled, setVoiceEnabled, speak, speakingText, stopSpeaking, voiceEnabled } from '@/lib/client/djVoice';
 
 interface Suggestion {
   title: string;
@@ -68,6 +68,7 @@ export default function DjPage() {
   const [micError, setMicError] = useState('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [got, setGot] = useState<Record<string, string>>({});
+  const [speakingNow, setSpeakingNow] = useState<string | null>(null);
   const previewRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -77,6 +78,8 @@ export default function DjPage() {
   useEffect(() => {
     setVoice(voiceEnabled());
     setSegues(seguesEnabled());
+    setSpeakingNow(speakingText());
+    const unsubscribe = onSpeakingChange(setSpeakingNow);
     fetch('/api/dj/status').then((r) => r.json()).then(setStatus).catch(() => {});
     fetch('/api/settings/lidarr').then((r) => r.json()).then((d) => setLidarr(Boolean(d.configured))).catch(() => {});
     fetch('/api/users')
@@ -94,6 +97,7 @@ export default function DjPage() {
       })
       .catch(() => {});
     return () => {
+      unsubscribe();
       previewRef.current?.pause();
       stopSpeaking();
     };
@@ -325,8 +329,13 @@ export default function DjPage() {
               <div className={`max-w-[90%] rounded-2xl rounded-bl-sm px-4 py-2 text-sm ${m.error ? 'bg-negative/10 text-negative' : 'bg-elevated'}`}>
                 {m.content}
                 {!m.error && voiceAvailable && (
-                  <button className="ml-2 align-middle text-subdued hover:text-white" onClick={() => speak(m.content)} title="Say it again" aria-label="Say it again">
-                    <PlayIcon size={12} />
+                  <button
+                    className="ml-2 align-middle text-subdued hover:text-white"
+                    onClick={() => (speakingNow === m.content ? stopSpeaking() : speak(m.content))}
+                    title={speakingNow === m.content ? 'Stop talking' : 'Say it again'}
+                    aria-label={speakingNow === m.content ? 'Stop talking' : 'Say it again'}
+                  >
+                    {speakingNow === m.content ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
                   </button>
                 )}
               </div>

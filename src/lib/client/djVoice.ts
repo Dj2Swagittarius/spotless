@@ -11,6 +11,25 @@ import { usePlayer } from '@/store/player';
 
 let current: HTMLAudioElement | null = null;
 let duckedFrom: number | null = null;
+// bumped by every speak/stop: a line whose audio arrives after a newer request is dropped,
+// so repeated clicks while the voice is still being generated can't stack up
+let generation = 0;
+let speaking: string | null = null;
+const listeners = new Set<(text: string | null) => void>();
+
+function setSpeaking(text: string | null) {
+  speaking = text;
+  listeners.forEach((l) => l(text));
+}
+
+/** The line being spoken (or fetched) right now, or null. */
+export const speakingText = () => speaking;
+
+/** Subscribe to the spoken line changing; returns an unsubscribe function. */
+export function onSpeakingChange(cb: (text: string | null) => void): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
 
 function duck() {
   const { volume, setVolume } = usePlayer.getState();
@@ -28,10 +47,12 @@ function unduck() {
 }
 
 export function stopSpeaking() {
+  generation++;
   current?.pause();
   current = null;
   if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
   unduck();
+  if (speaking !== null) setSpeaking(null);
 }
 
 function localVoice(): SpeechSynthesisVoice | null {
@@ -59,6 +80,12 @@ function speakInBrowser(text: string): Promise<void> {
 export async function speak(text: string): Promise<{ error?: string }> {
   stopSpeaking();
   if (!text.trim()) return {};
+  const mine = ++generation;
+  const stale = () => mine !== generation;
+  setSpeaking(text);
+  const done = () => {
+    if (!stale()) setSpeaking(null);
+  };
   try {
     const res = await fetch('/api/dj/speak', {
       method: 'POST',
@@ -68,22 +95,26 @@ export async function speak(text: string): Promise<{ error?: string }> {
     const type = res.headers.get('content-type') ?? '';
     if (type.includes('application/json')) {
       const d = await res.json();
+      if (stale()) return {};
       if (d.off) return {};
       if (d.browser) {
         duck();
         await speakInBrowser(text);
-        unduck();
+        if (!stale()) unduck();
         return {};
       }
       return { error: d.error ?? 'voice failed' };
     }
-    const url = URL.createObjectURL(await res.blob());
+    const blob = await res.blob();
+    if (stale()) return {};
+    const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     current = audio;
     duck();
     await new Promise<void>((resolve) => {
       audio.onended = () => resolve();
       audio.onerror = () => resolve();
+      audio.onpause = () => resolve(); // stopSpeaking() pauses it
       audio.play().catch(() => resolve());
     });
     URL.revokeObjectURL(url);
@@ -93,8 +124,10 @@ export async function speak(text: string): Promise<{ error?: string }> {
     }
     return {};
   } catch (err) {
-    unduck();
+    if (!stale()) unduck();
     return { error: String(err) };
+  } finally {
+    done();
   }
 }
 

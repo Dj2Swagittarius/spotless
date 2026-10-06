@@ -118,15 +118,34 @@ const songs = (a: RawAction): WantedSong[] =>
     .slice(0, 50)
     .map((t) => ({ title: t.title.trim().slice(0, 200), artist: t.artist.trim().slice(0, 200), reason: typeof t.reason === 'string' ? t.reason.slice(0, 300) : undefined }));
 
+/** Lowercase, no accents, no "(feat. ...)" / "- Remastered" tails, letters and digits only. */
+const loose = (s: string) =>
+  s
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\s*[([].*?[)\]]/g, '')
+    .replace(/\s+-\s+.*$/, '')
+    .replace(/\b(feat|ft)\b.*$/, '')
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '');
+
+const sameish = (a: string, b: string) => {
+  const x = loose(a);
+  const y = loose(b);
+  return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
+};
+
 /** Look a song up on Deezer. `found: false` means Deezer answered and has no such song by that artist. */
 async function deezerLookup(s: WantedSong): Promise<{ suggestion: Suggestion; found: boolean | null }> {
   const base: Suggestion = { title: s.title, artist: s.artist, reason: s.reason ?? null, cover: null, previewUrl: null, deezerUrl: null };
   try {
-    const q = encodeURIComponent(`artist:"${s.artist}" track:"${s.title}"`);
-    const res = await fetch(`https://api.deezer.com/search/track?q=${q}&limit=1`, { signal: AbortSignal.timeout(8000) });
+    // Deezer's artist:"" track:"" filters return nothing now, so search plainly and check the hits ourselves
+    const q = encodeURIComponent(`${s.artist} ${s.title}`);
+    const res = await fetch(`https://api.deezer.com/search/track?q=${q}&limit=10`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return { suggestion: base, found: null };
     const d = (await res.json()) as { data?: { title: string; preview: string | null; link: string; artist: { name: string }; album: { cover_medium: string | null } }[] };
-    const hit = d.data?.[0];
+    const hit = d.data?.find((h) => sameish(h.artist.name, s.artist) && sameish(h.title, s.title));
     if (!hit) return { suggestion: base, found: false };
     return { suggestion: { ...base, cover: hit.album.cover_medium, previewUrl: hit.preview || null, deezerUrl: hit.link }, found: true };
   } catch {
@@ -210,25 +229,58 @@ export async function runDj(userId: number, userName: string, history: ChatMessa
 
   // songs it wanted to play but the library lacks are worth surfacing as suggestions
   const explicit = new Set(suggestions.map((s) => `${s.artist}|${s.title}`.toLowerCase()));
-  const all = [...suggestions, ...unmatched.filter((u) => u.title !== '(any song)')].slice(0, 12);
-  if (all.length) {
-    reply.suggestions = await Promise.all(
-      all.map(async (s) => {
-        const owned = index.find(s.title, s.artist);
-        if (owned !== undefined) {
+  const owned: WantedSong[] = [];
+  const unreal: WantedSong[] = [];
+  const verify = (list: WantedSong[], queueOwned: boolean) =>
+    Promise.all(
+      list.map(async (s) => {
+        const ownedId = index.find(s.title, s.artist);
+        if (ownedId !== undefined) {
+          owned.push(s);
           // the model thought it was new, but the listener already has it: queue it instead
-          const t = tracksByIds([owned]);
-          reply.queue = [...(reply.queue ?? []), ...t];
+          if (queueOwned) reply.queue = [...(reply.queue ?? []), ...tracksByIds([ownedId])];
           return null;
         }
         const { suggestion, found } = await deezerLookup(s);
         // Deezer has no such song by that artist: almost always a made-up title or wrong artist
-        if (found === false) return null;
+        if (found === false) {
+          unreal.push(s);
+          return null;
+        }
         // a play pick we couldn't verify at all isn't worth showing; explicit suggestions are
         if (found === null && !explicit.has(`${s.artist}|${s.title}`.toLowerCase())) return null;
         return suggestion;
       })
-    ).then((list) => list.filter((s): s is Suggestion => s !== null));
+    ).then((out) => out.filter((s): s is Suggestion => s !== null));
+
+  const all = [...suggestions, ...unmatched.filter((u) => u.title !== '(any song)')].slice(0, 12);
+  if (all.length) reply.suggestions = await verify(all, true);
+
+  // asked for new songs but some were already owned or made up: ask once for replacements,
+  // so "here are five songs" comes with five songs
+  const short = suggestions.length - (reply.suggestions ?? []).filter((s) => explicit.has(`${s.artist}|${s.title}`.toLowerCase())).length;
+  if (suggestions.length && short > 0) {
+    const list = (l: WantedSong[]) => l.map((s) => `${s.title} by ${s.artist}`).join('; ');
+    const nudge = [
+      owned.length ? `The listener already owns: ${list(owned)}.` : '',
+      unreal.length ? `These could not be found as real songs: ${list(unreal)}.` : '',
+      `Suggest ${short} other real, existing songs they do not have yet, in the same spirit. Reply with only {"say":"","actions":[{"type":"suggest","tracks":[...]}]}.`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    try {
+      const more = parseReply(await complete(cfg, system, [...history, { role: 'assistant', content: text }, { role: 'user', content: nudge }]));
+      const seen = new Set([...all, ...owned, ...unreal].map((s) => `${s.artist}|${s.title}`.toLowerCase()));
+      const extra = more.actions
+        .filter((a) => a.type === 'suggest')
+        .flatMap(songs)
+        .filter((s) => !seen.has(`${s.artist}|${s.title}`.toLowerCase()));
+      extra.forEach((s) => explicit.add(`${s.artist}|${s.title}`.toLowerCase()));
+      const found = await verify(extra, false);
+      reply.suggestions = [...(reply.suggestions ?? []), ...found.slice(0, short)];
+    } catch {
+      // keep what the first answer gave
+    }
   }
   if (unmatched.length) reply.unmatched = unmatched.slice(0, 20);
   // the model sometimes returns only an action; give the listener a line anyway
