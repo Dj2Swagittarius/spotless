@@ -1,3 +1,7 @@
+# Throwaway test stack for local development (see CONTRIBUTING.md).
+# Uses its own container name, host port 3300 and ./test-env/* folders so it can run next to
+# a production `docker compose up` on port 3000 without colliding with it or its ./data.
+#   docker compose -f docker-compose.test.yml up --build
 services:
   spotless-test:
     build:
@@ -6,7 +10,7 @@ services:
     restart: "no"
 
     ports:
-      - "3000:3000"
+      - "3300:3000"
 
     environment:
       MUSIC_DIR: /music

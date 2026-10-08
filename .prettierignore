@@ -1,0 +1,9 @@
+node_modules
+.next
+data
+docs
+public
+dj-test
+package-lock.json
+next-env.d.ts
+*.tsbuildinfo

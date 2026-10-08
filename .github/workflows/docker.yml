@@ -1,11 +1,12 @@
 name: Build and publish container image
 
-# Builds the app image on every push to main and publishes it to GHCR.
+# Builds the app image on every push to main (and on v* tags) and publishes it to GHCR.
 # Self-hosted installs pull ghcr.io/<owner>/spotless:latest; Watchtower
 # (or any pull-based updater) picks the new digest up on its next poll.
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 concurrency:
@@ -13,7 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Same gate as ci.yml: never publish an image from a tree that does not typecheck, lint,
+  # test and build.
+  ci:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm test
+
+      - run: npm run build
+
   build:
+    needs: ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,6 +48,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # QEMU provides the arm64 emulation for the multi-platform build (Raspberry Pi, Apple Silicon hosts).
+      - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
@@ -36,6 +66,7 @@ jobs:
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      # main -> latest + sha; v1.2.3 tag -> 1.2.3, 1.2 and latest.
       - name: Derive tags
         id: meta
         uses: docker/metadata-action@v5
@@ -45,6 +76,8 @@ jobs:
             type=raw,value=latest
             type=sha,format=long
             type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -53,6 +86,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -3,6 +3,10 @@ node_modules/
 data/
 *.tsbuildinfo
 next-env.d.ts
+# local environment files; .env.example is the committed template
+.env
+.env.*
+!.env.example
 .env*.local
 test-env
 # personal dj-test settings (LAN addresses, NAS share)
