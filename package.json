@@ -21,7 +21,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
     "better-sqlite3": "^11.10.0",
-    "music-metadata": "^11.13.0",
+    "music-metadata": "^12.0.0",
     "next": "^16.3.7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
