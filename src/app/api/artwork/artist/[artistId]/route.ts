@@ -1,8 +1,14 @@
 import fs from 'fs';
 import { NextRequest } from 'next/server';
 import { artistArtPath, imageContentType } from '@/lib/art';
+import { fileValidators, isNotModified } from '@/lib/streaming';
 
 export const dynamic = 'force-dynamic';
+
+/** The initial comes straight from the query string, so it must not be able to close the <text>. */
+function escapeXml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[c]!);
+}
 
 function placeholder(letter: string): Response {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
@@ -11,7 +17,7 @@ function placeholder(letter: string): Response {
   </linearGradient></defs>
   <rect width="300" height="300" fill="url(#g)"/>
   <text x="150" y="150" font-family="sans-serif" font-size="120" font-weight="bold"
-        fill="rgba(255,255,255,0.35)" text-anchor="middle" dominant-baseline="central">${letter}</text>
+        fill="rgba(255,255,255,0.35)" text-anchor="middle" dominant-baseline="central">${escapeXml(letter)}</text>
 </svg>`;
   return new Response(svg, {
     headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' },
@@ -21,14 +27,26 @@ function placeholder(letter: string): Response {
 export async function GET(req: NextRequest, { params }: { params: Promise<{ artistId: string }> }) {
   const { artistId } = await params;
   const id = Number(artistId);
-  const letter = (req.nextUrl.searchParams.get('l') || '♪').slice(0, 1).toUpperCase();
+  // first code point, not first UTF-16 unit: half an emoji is not valid XML
+  const letter = (Array.from(req.nextUrl.searchParams.get('l') || '♪')[0] ?? '♪').toUpperCase();
   if (!Number.isInteger(id)) return placeholder(letter);
   const file = artistArtPath(id);
-  if (!fs.existsSync(file)) return placeholder(letter);
-  const buf = fs.readFileSync(file);
+  const st = await fs.promises.stat(file).catch(() => null);
+  if (!st?.isFile()) return placeholder(letter);
+
+  const v = fileValidators(st);
+  const headers = {
+    'Cache-Control': 'public, max-age=86400',
+    ETag: v.etag,
+    'Last-Modified': v.lastModified,
+  };
+  if (isNotModified(req, v)) return new Response(null, { status: 304, headers });
+
+  const buf = await fs.promises.readFile(file);
+  // stored bytes are only ever served under a sniffed raster type, never text/html or svg
   const contentType = imageContentType(buf);
   if (!contentType) return placeholder(letter);
   return new Response(new Uint8Array(buf), {
-    headers: { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=86400' },
+    headers: { ...headers, 'Content-Type': contentType, 'X-Content-Type-Options': 'nosniff' },
   });
 }
