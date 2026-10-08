@@ -1,48 +1,94 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CardGrid, AlbumCard } from '@/components/Cards';
+import { CardGrid, AlbumCard, LoadErrorState } from '@/components/Cards';
+import { CardGridSkeleton, RowListSkeleton } from '@/components/Skeleton';
 import { HeartIcon, PlusIcon, MusicIcon } from '@/components/Icons';
 import SpotifyImport from '@/components/SpotifyImport';
 import PromptModal from '@/components/PromptModal';
 import PlaylistCover from '@/components/PlaylistCover';
+import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
 import type { Album, Artist, Playlist } from '@/lib/types';
 
 type Tab = 'playlists' | 'albums' | 'artists';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'playlists', label: 'Playlists' },
+  { id: 'albums', label: 'Albums' },
+  { id: 'artists', label: 'Artists' },
+];
 
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>('playlists');
   const [albums, setAlbums] = useState<Album[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  const [attempt, setAttempt] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [mine, setMine] = useState(false);
   const [myArtistIds, setMyArtistIds] = useState<Set<number>>(new Set());
   const [isAdmin, setIsAdmin] = useState(false);
+  // the rescan poll lives in a ref so navigating away mid-scan clears it instead of leaking a timer
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    fetch('/api/albums').then((r) => r.json()).then(setAlbums).catch(() => {});
-    fetch('/api/artists').then((r) => r.json()).then(setArtists).catch(() => {});
-    fetch('/api/playlists').then((r) => r.json()).then(setPlaylists).catch(() => {});
-    fetch('/api/my-artists').then((r) => r.json()).then((ids: number[]) => setMyArtistIds(new Set(ids))).catch(() => {});
-    fetch('/api/users').then((r) => r.json()).then((d) => setIsAdmin(!!d.current?.isAdmin)).catch(() => {});
-  }, []);
+    const ac = new AbortController();
+    const init = { signal: ac.signal };
+    setStatus((s) => (s === 'ready' ? s : 'loading'));
+    Promise.all([
+      getJson<Album[]>('/api/albums', init),
+      getJson<Artist[]>('/api/artists', init),
+      getJson<Playlist[]>('/api/playlists', init),
+    ])
+      .then(([al, ar, pl]) => {
+        setAlbums(al);
+        setArtists(ar);
+        setPlaylists(pl);
+        setStatus('ready');
+      })
+      .catch((err) => {
+        if (!isAbortError(err)) setStatus('error');
+      });
+    // these only affect the "My music" filter and the admin-only button; failures leave the defaults
+    getJson<number[]>('/api/my-artists', init)
+      .then((ids) => setMyArtistIds(new Set(ids)))
+      .catch(() => {});
+    getJson<{ current?: { isAdmin?: boolean } }>('/api/users', init)
+      .then((d) => setIsAdmin(!!d.current?.isAdmin))
+      .catch(() => {});
+    return () => ac.abort();
+  }, [attempt]);
 
+  useEffect(
+    () => () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    },
+    []
+  );
+
+  // kick off a scan, then refetch the lists when it finishes: a reload here would stop playback
   const rescan = async () => {
     setScanning(true);
-    await fetch('/api/scan', { method: 'POST' });
-    const poll = setInterval(async () => {
-      const s = await fetch('/api/scan').then((r) => r.json());
-      if (!s.scanning) {
-        clearInterval(poll);
-        setScanning(false);
-        location.reload();
-      }
+    const res = await fetch('/api/scan', { method: 'POST' }).catch(() => null);
+    // 202 = a scan is already running; poll that one instead
+    if (!res || (!res.ok && res.status !== 202)) {
+      setScanning(false);
+      return;
+    }
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const s = await getJson<{ scanning: boolean }>('/api/scan').catch(() => null);
+      if (s?.scanning) return;
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = null;
+      setScanning(false);
+      setAttempt((n) => n + 1);
     }, 1500);
   };
 
@@ -68,19 +114,32 @@ export default function LibraryPage() {
       {importOpen && (
         <SpotifyImport
           onClose={() => setImportOpen(false)}
-          onImported={() => fetch('/api/playlists').then((r) => r.json()).then(setPlaylists).catch(() => {})}
+          onImported={() => getJson<Playlist[]>('/api/playlists').then(setPlaylists).catch(() => {})}
         />
       )}
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-4 text-3xl font-bold">Your Library</h1>
-        <button className={tabClass('playlists')} onClick={() => setTab('playlists')}>Playlists</button>
-        <button className={tabClass('albums')} onClick={() => setTab('albums')}>Albums</button>
-        <button className={tabClass('artists')} onClick={() => setTab('artists')}>Artists</button>
+        <div role="tablist" aria-label="Library sections" className="flex flex-wrap items-center gap-2">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              id={`library-tab-${t.id}`}
+              aria-selected={tab === t.id}
+              aria-controls={`library-panel-${t.id}`}
+              className={tabClass(t.id)}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
         <Link href="/radios" className="rounded-full bg-highlight px-4 py-1.5 text-sm font-medium text-white hover:bg-press">
           Radio
         </Link>
         <button
           onClick={() => setMine((v) => !v)}
+          aria-pressed={mine}
           className={`rounded-full px-4 py-1.5 text-sm font-medium ${mine ? 'bg-accent text-black' : 'bg-highlight text-white hover:bg-press'}`}
           title="Only artists you added to My music"
         >
@@ -98,8 +157,10 @@ export default function LibraryPage() {
         )}
       </div>
 
+      {status === 'error' && <LoadErrorState what="your library" onRetry={() => setAttempt((n) => n + 1)} />}
+
       {tab === 'playlists' && (
-        <div className="space-y-2">
+        <div role="tabpanel" id="library-panel-playlists" aria-labelledby="library-tab-playlists" className="space-y-2">
           <Link href="/liked" className="flex items-center gap-4 rounded-lg bg-elevated p-3 hover:bg-highlight">
             <div className="flex h-16 w-16 items-center justify-center rounded bg-gradient-to-br from-indigo-600 to-white/80">
               <HeartIcon size={24} filled className="text-white" />
@@ -109,6 +170,7 @@ export default function LibraryPage() {
               <div className="text-sm text-subdued">Playlist</div>
             </div>
           </Link>
+          {status === 'loading' && <RowListSkeleton count={3} />}
           {playlists.map((pl) => (
             <Link key={pl.id} href={`/playlist/${pl.id}`} className="flex items-center gap-4 rounded-lg bg-elevated p-3 hover:bg-highlight">
               <PlaylistCover artIds={pl.artIds} size="md" />
@@ -140,36 +202,49 @@ export default function LibraryPage() {
       )}
 
       {tab === 'albums' && (
-        <CardGrid>
-          {(mine ? albums.filter((a) => myArtistIds.has(a.artistId)) : albums).map((a) => (
-            <AlbumCard key={a.id} album={a} />
-          ))}
-        </CardGrid>
+        <div role="tabpanel" id="library-panel-albums" aria-labelledby="library-tab-albums">
+          {status === 'loading' ? (
+            <CardGridSkeleton count={14} />
+          ) : (
+            <CardGrid>
+              {(mine ? albums.filter((a) => myArtistIds.has(a.artistId)) : albums).map((a) => (
+                <AlbumCard key={a.id} album={a} />
+              ))}
+            </CardGrid>
+          )}
+        </div>
       )}
 
       {tab === 'artists' && (
-        <div className="grid grid-cols-1 gap-1 md:grid-cols-2 xl:grid-cols-3">
-          {(mine ? artists.filter((a) => myArtistIds.has(a.id)) : artists).map((a) => (
-            <Link
-              key={a.id}
-              href={`/artist/${a.id}`}
-              className="flex items-center gap-3 rounded px-2 py-1.5 hover:bg-white/10"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/artwork/artist/${a.id}?l=${encodeURIComponent(a.name.charAt(0))}`}
-                alt=""
-                className="h-11 w-11 shrink-0 rounded-full object-cover"
-                loading="lazy"
-              />
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">{a.name}</div>
-                <div className="text-xs text-subdued">
-                  {a.albumCount} {a.albumCount === 1 ? 'album' : 'albums'} · {a.trackCount} songs
-                </div>
-              </div>
-            </Link>
-          ))}
+        <div role="tabpanel" id="library-panel-artists" aria-labelledby="library-tab-artists">
+          {status === 'loading' ? (
+            <RowListSkeleton count={8} />
+          ) : (
+            <div className="grid grid-cols-1 gap-1 md:grid-cols-2 xl:grid-cols-3">
+              {(mine ? artists.filter((a) => myArtistIds.has(a.id)) : artists).map((a) => (
+                <Link
+                  key={a.id}
+                  href={`/artist/${a.id}`}
+                  className="flex items-center gap-3 rounded px-2 py-1.5 hover:bg-white/10"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/artwork/artist/${a.id}?l=${encodeURIComponent(a.name.charAt(0))}`}
+                    alt=""
+                    className="h-11 w-11 shrink-0 rounded-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{a.name}</div>
+                    <div className="text-xs text-subdued">
+                      {a.albumCount} {a.albumCount === 1 ? 'album' : 'albums'} · {a.trackCount} songs
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

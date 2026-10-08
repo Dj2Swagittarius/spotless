@@ -3,9 +3,10 @@
 import { use, useEffect, useState } from 'react';
 import { usePlayer } from '@/store/player';
 import TrackList from '@/components/TrackList';
-import { CardGrid, AlbumCard } from '@/components/Cards';
+import { CardGrid, AlbumCard, LoadErrorState, NotFoundState } from '@/components/Cards';
 import { DetailHeaderSkeleton, RowListSkeleton } from '@/components/Skeleton';
-import { PlayIcon, PlusIcon } from '@/components/Icons';
+import { PlayIcon } from '@/components/Icons';
+import { getJson, isAbortError, failureStatus, type LoadStatus } from '@/lib/http';
 import type { Artist, Album, Track } from '@/lib/types';
 
 type ArtistDetail = Artist & { albums: Album[]; topTracks: Track[] };
@@ -13,19 +14,28 @@ type ArtistDetail = Artist & { albums: Album[]; topTracks: Track[] };
 export default function ArtistPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [artist, setArtist] = useState<ArtistDetail | null>(null);
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  const [attempt, setAttempt] = useState(0);
   const [collected, setCollected] = useState(false);
   const playQueue = usePlayer((s) => s.playQueue);
 
   useEffect(() => {
-    fetch(`/api/artists/${id}`)
-      .then((r) => r.json())
-      .then(setArtist)
+    const ac = new AbortController();
+    setStatus('loading');
+    getJson<ArtistDetail>(`/api/artists/${id}`, { signal: ac.signal })
+      .then((d) => {
+        setArtist(d);
+        setStatus('ready');
+      })
+      .catch((err) => {
+        if (!isAbortError(err)) setStatus(failureStatus(err));
+      });
+    // collection flag is cosmetic: a failure here just leaves the button in its default state
+    getJson<number[]>('/api/my-artists', { signal: ac.signal })
+      .then((ids) => setCollected(ids.includes(Number(id))))
       .catch(() => {});
-    fetch('/api/my-artists')
-      .then((r) => r.json())
-      .then((ids: number[]) => setCollected(ids.includes(Number(id))))
-      .catch(() => {});
-  }, [id]);
+    return () => ac.abort();
+  }, [id, attempt]);
 
   const toggleCollect = async () => {
     setCollected((c) => !c);
@@ -38,7 +48,9 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
       });
   };
 
-  if (!artist)
+  if (status === 'notfound') return <NotFoundState what="artist" />;
+  if (status === 'error') return <LoadErrorState what="this artist" onRetry={() => setAttempt((n) => n + 1)} />;
+  if (status === 'loading' || !artist)
     return (
       <div className="space-y-8">
         <DetailHeaderSkeleton round />
@@ -68,6 +80,7 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
         onClick={() => playQueue(artist.topTracks, 0)}
         className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-black shadow-lg transition-transform hover:scale-105 hover:bg-accentBright"
         title="Play top tracks"
+        aria-label="Play top tracks"
       >
         <PlayIcon size={24} />
       </button>

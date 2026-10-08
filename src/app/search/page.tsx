@@ -3,8 +3,9 @@
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import TrackList from '@/components/TrackList';
-import { CardGrid, AlbumCard, ArtistCard } from '@/components/Cards';
+import { CardGrid, AlbumCard, ArtistCard, LoadErrorState } from '@/components/Cards';
 import { SearchIcon, PlayIcon, PauseIcon, MicIcon } from '@/components/Icons';
+import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
 import type { Track, Album, Artist } from '@/lib/types';
 
 interface Results {
@@ -42,6 +43,38 @@ interface DzResults {
   tracks: DzTrack[];
 }
 
+interface DlButtonProps {
+  artist: string;
+  /** Stable id for this row's download state. */
+  k: string;
+  album?: string;
+  /** Current state for `k`: 'busy' | 'ok' | 'requested' | 'err:<reason>' | undefined. */
+  state: string | undefined;
+  lidarrConfigured: boolean;
+  isAdmin: boolean;
+  onDownload: (artist: string, key: string, album?: string) => void;
+}
+
+// module scope on purpose: declared inside the page it would be a new component type on every
+// render, remounting every button (and dropping focus) whenever any state changed
+function DlButton({ artist, k, album, state, lidarrConfigured, isAdmin, onDownload }: DlButtonProps) {
+  if (!lidarrConfigured) return null;
+  if (state === 'busy') return <span className="text-xs text-subdued">Sending…</span>;
+  if (state === 'ok') return <span className="text-xs font-medium text-accent">✓ Sent to Lidarr</span>;
+  if (state === 'requested') return <span className="text-xs font-medium text-accent">✓ Requested</span>;
+  if (state?.startsWith('err')) return <span className="text-xs text-negative" title={state}>Failed</span>;
+  const what = album ? `"${album}" by ${artist}` : artist;
+  return (
+    <button
+      onClick={() => onDownload(artist, k, album)}
+      className="rounded-full border border-border px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-subdued hover:border-white hover:text-white"
+      title={isAdmin ? `Download ${what} via Lidarr` : `Request download of ${what}`}
+    >
+      {isAdmin ? '⤓ Lidarr' : '⤓ Request'}
+    </button>
+  );
+}
+
 export default function SearchPage() {
   // useSearchParams needs a Suspense boundary so the page can still prerender
   return (
@@ -56,6 +89,8 @@ function Search() {
   const urlQ = useSearchParams().get('q') ?? undefined;
   const [q, setQ] = useState(urlQ ?? '');
   const [results, setResults] = useState<Results | null>(null);
+  const [status, setStatus] = useState<LoadStatus>('ready');
+  const [attempt, setAttempt] = useState(0);
   const [dz, setDz] = useState<DzResults | null>(null);
   const [lidarrConfigured, setLidarrConfigured] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -64,9 +99,17 @@ function Search() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    fetch('/api/settings/lidarr').then((r) => r.json()).then((d) => setLidarrConfigured(d.configured)).catch(() => {});
-    fetch('/api/users').then((r) => r.json()).then((d) => setIsAdmin(!!d.current?.isAdmin)).catch(() => {});
-    return () => audioRef.current?.pause();
+    const ac = new AbortController();
+    getJson<{ configured: boolean }>('/api/settings/lidarr', { signal: ac.signal })
+      .then((d) => setLidarrConfigured(Boolean(d.configured)))
+      .catch(() => {});
+    getJson<{ current?: { isAdmin?: boolean } }>('/api/users', { signal: ac.signal })
+      .then((d) => setIsAdmin(!!d.current?.isAdmin))
+      .catch(() => {});
+    return () => {
+      ac.abort();
+      audioRef.current?.pause();
+    };
   }, []);
 
   // desktop top bar drives the URL; follow it
@@ -80,20 +123,32 @@ function Search() {
     if (!query) {
       setResults(null);
       setDz(null);
+      setStatus('ready');
       return;
     }
+    // one controller per debounce tick: typing on cancels the in-flight requests, so a slow
+    // response for an older query can never land on top of the newer results
+    const ac = new AbortController();
     const t = setTimeout(() => {
-      fetch(`/api/search?q=${encodeURIComponent(query)}`)
-        .then((r) => r.json())
-        .then(setResults)
-        .catch(() => {});
-      fetch(`/api/search/deezer?q=${encodeURIComponent(query)}`)
-        .then((r) => r.json())
+      setStatus('loading');
+      getJson<Results>(`/api/search?q=${encodeURIComponent(query)}`, { signal: ac.signal })
+        .then((d) => {
+          setResults(d);
+          setStatus('ready');
+        })
+        .catch((err) => {
+          if (!isAbortError(err)) setStatus('error');
+        });
+      // Deezer is a bonus: when it fails the library results still show
+      getJson<DzResults>(`/api/search/deezer?q=${encodeURIComponent(query)}`, { signal: ac.signal })
         .then(setDz)
         .catch(() => {});
     }, 300);
-    return () => clearTimeout(t);
-  }, [q]);
+    return () => {
+      clearTimeout(t);
+      ac.abort();
+    };
+  }, [q, attempt]);
 
   const download = async (artist: string, key: string, album?: string) => {
     setDlState((s) => ({ ...s, [key]: 'busy' }));
@@ -101,11 +156,11 @@ function Search() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(album ? { artist, album } : { artist }),
-    });
-    const data = await res.json().catch(() => ({}));
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
     setDlState((s) => ({
       ...s,
-      [key]: res.ok ? (data.status === 'requested' ? 'requested' : 'ok') : `err:${data.error ?? 'failed'}`,
+      [key]: res?.ok ? (data.status === 'requested' ? 'requested' : 'ok') : `err:${data.error ?? 'failed'}`,
     }));
   };
 
@@ -124,23 +179,7 @@ function Search() {
     setPlayingUrl(url);
   };
 
-  const DlButton = ({ artist, k, album }: { artist: string; k: string; album?: string }) => {
-    if (!lidarrConfigured) return null;
-    const st = dlState[k];
-    if (st === 'busy') return <span className="text-xs text-subdued">Sending…</span>;
-    if (st === 'ok') return <span className="text-xs font-medium text-accent">✓ Sent to Lidarr</span>;
-    if (st === 'requested') return <span className="text-xs font-medium text-accent">✓ Requested</span>;
-    if (st?.startsWith('err')) return <span className="text-xs text-negative" title={st}>Failed</span>;
-    return (
-      <button
-        onClick={() => download(artist, k, album)}
-        className="rounded-full border border-border px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-subdued hover:border-white hover:text-white"
-      >
-        {isAdmin ? '⤓ Lidarr' : '⤓ Request'}
-      </button>
-    );
-  };
-
+  const dlProps = { lidarrConfigured, isAdmin, onDownload: download };
   const hasLib = results && (results.tracks.length > 0 || results.albums.length > 0 || results.artists.length > 0);
   const hasDz = dz && (dz.artists.length > 0 || dz.albums.length > 0 || dz.tracks.length > 0);
 
@@ -169,7 +208,9 @@ function Search() {
         </div>
       )}
 
-      {results && (
+      {status === 'error' && <LoadErrorState what="search results" onRetry={() => setAttempt((n) => n + 1)} />}
+
+      {results && status !== 'error' && (
         <>
           {results.tracks.length > 0 && (
             <section>
@@ -210,21 +251,24 @@ function Search() {
             <div className="mb-6">
               <h3 className="mb-2 font-bold text-subdued">Artists</h3>
               <div className="flex flex-wrap gap-3">
-                {dz!.artists.map((a) => (
-                  <div key={a.name} className="flex w-64 items-center gap-3 rounded-lg bg-elevated p-3">
-                    {a.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={a.image} alt="" className="h-12 w-12 rounded-full object-cover" />
-                    ) : (
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-highlight"><MicIcon size={20} className="text-subdued" /></div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-semibold">{a.name}</div>
-                      <div className="text-xs text-subdued">{a.fans.toLocaleString()} fans</div>
+                {dz!.artists.map((a) => {
+                  const k = `ar|${a.name}`;
+                  return (
+                    <div key={a.name} className="flex w-64 items-center gap-3 rounded-lg bg-elevated p-3">
+                      {a.image ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={a.image} alt="" className="h-12 w-12 rounded-full object-cover" loading="lazy" decoding="async" />
+                      ) : (
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-highlight"><MicIcon size={20} className="text-subdued" /></div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold">{a.name}</div>
+                        <div className="text-xs text-subdued">{a.fans.toLocaleString()} fans</div>
+                      </div>
+                      <DlButton artist={a.name} k={k} state={dlState[k]} {...dlProps} />
                     </div>
-                    <DlButton artist={a.name} k={`ar|${a.name}`} />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -233,19 +277,22 @@ function Search() {
             <div className="mb-6">
               <h3 className="mb-2 font-bold text-subdued">Albums</h3>
               <div className="flex gap-3 overflow-x-auto pb-2">
-                {dz!.albums.map((al) => (
-                  <div key={`${al.artist}-${al.title}`} className="w-40 shrink-0 rounded-lg bg-elevated p-3">
-                    {al.cover ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={al.cover} alt="" className="mb-2 aspect-square w-full rounded object-cover" />
-                    ) : (
-                      <div className="mb-2 aspect-square w-full rounded bg-highlight" />
-                    )}
-                    <div className="truncate text-sm font-semibold" title={al.title}>{al.title}</div>
-                    <div className="mb-2 truncate text-xs text-subdued">{al.artist}</div>
-                    <DlButton artist={al.artist} k={`al|${al.artist}|${al.title}`} album={al.title} />
-                  </div>
-                ))}
+                {dz!.albums.map((al) => {
+                  const k = `al|${al.artist}|${al.title}`;
+                  return (
+                    <div key={`${al.artist}-${al.title}`} className="w-40 shrink-0 rounded-lg bg-elevated p-3">
+                      {al.cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={al.cover} alt="" className="mb-2 aspect-square w-full rounded object-cover" loading="lazy" decoding="async" />
+                      ) : (
+                        <div className="mb-2 aspect-square w-full rounded bg-highlight" />
+                      )}
+                      <div className="truncate text-sm font-semibold" title={al.title}>{al.title}</div>
+                      <div className="mb-2 truncate text-xs text-subdued">{al.artist}</div>
+                      <DlButton artist={al.artist} k={k} album={al.title} state={dlState[k]} {...dlProps} />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -254,30 +301,36 @@ function Search() {
             <div>
               <h3 className="mb-2 font-bold text-subdued">Songs</h3>
               <div className="grid grid-cols-1 gap-1 lg:grid-cols-2">
-                {dz!.tracks.map((t) => (
-                  <div key={t.deezerUrl} className="flex items-center gap-3 rounded p-2 hover:bg-white/5">
-                    {t.cover ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={t.cover} alt="" className="h-10 w-10 rounded object-cover" />
-                    ) : (
-                      <div className="h-10 w-10 rounded bg-highlight" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{t.title}</div>
-                      <div className="truncate text-xs text-subdued">{t.artist} · {t.album}</div>
+                {dz!.tracks.map((t) => {
+                  const k = `tr|${t.artist}|${t.title}`;
+                  const playing = playingUrl !== null && playingUrl === t.previewUrl;
+                  return (
+                    <div key={t.deezerUrl} className="flex items-center gap-3 rounded p-2 hover:bg-white/5">
+                      {t.cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={t.cover} alt="" className="h-10 w-10 rounded object-cover" loading="lazy" decoding="async" />
+                      ) : (
+                        <div className="h-10 w-10 rounded bg-highlight" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{t.title}</div>
+                        <div className="truncate text-xs text-subdued">{t.artist} · {t.album}</div>
+                      </div>
+                      {t.previewUrl && (
+                        <button
+                          onClick={() => togglePreview(t.previewUrl!)}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 hover:bg-accent hover:text-black md:h-8 md:w-8"
+                          title="30-second preview"
+                          aria-label={playing ? `Stop preview of ${t.title}` : `Preview ${t.title}`}
+                          aria-pressed={playing}
+                        >
+                          {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
+                        </button>
+                      )}
+                      <DlButton artist={t.artist} k={k} album={t.album} state={dlState[k]} {...dlProps} />
                     </div>
-                    {t.previewUrl && (
-                      <button
-                        onClick={() => togglePreview(t.previewUrl!)}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 hover:bg-accent hover:text-black md:h-8 md:w-8"
-                        title="30-second preview"
-                      >
-                        {playingUrl === t.previewUrl ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
-                      </button>
-                    )}
-                    <DlButton artist={t.artist} k={`tr|${t.artist}|${t.title}`} album={t.album} />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
