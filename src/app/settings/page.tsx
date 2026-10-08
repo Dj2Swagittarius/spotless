@@ -76,6 +76,10 @@ interface Dislike {
   disliked_at: string;
 }
 
+// Inlined by next.config.mjs at build time (see src/lib/version.ts for the server side).
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || 'dev';
+const APP_COMMIT = process.env.NEXT_PUBLIC_APP_COMMIT || '';
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg bg-elevated p-5">
@@ -1010,6 +1014,30 @@ export default function SettingsPage() {
             ))}
           </div>
         )}
+      </Section>
+      <Section title="About">
+        <div className="text-sm">
+          Spotless <span className="font-semibold">v{APP_VERSION}</span>
+          {APP_COMMIT ? <span className="text-subdued"> · build {APP_COMMIT}</span> : null}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-4 text-sm text-subdued">
+          <a
+            href="https://github.com/Dj2Swagittarius/spotless/releases"
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-white"
+          >
+            Release notes
+          </a>
+          <a
+            href="https://github.com/Dj2Swagittarius/spotless"
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-white"
+          >
+            Source on GitHub
+          </a>
+        </div>
       </Section>
     </div>
   );

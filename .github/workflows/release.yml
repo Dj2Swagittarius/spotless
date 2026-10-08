@@ -1,0 +1,48 @@
+name: Release
+
+# A vX.Y.Z tag (created by `npm run release`) becomes a GitHub Release whose notes are that
+# version's CHANGELOG section. The container image for the same tag is published by docker.yml.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check that the tag matches package.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag v$TAG does not match package.json version $PKG — use npm run release" >&2
+            exit 1
+          fi
+
+      - name: Collect release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          node scripts/release.mjs --notes "$VERSION" > notes.md
+          {
+            echo
+            echo "**Container image:** \`$IMAGE:$VERSION\` (also \`:${VERSION%.*}\` and \`:latest\`)"
+          } >> notes.md
+          cat notes.md
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          EXTRA=""
+          case "$GITHUB_REF_NAME" in *-*) EXTRA="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Spotless $GITHUB_REF_NAME" --notes-file notes.md $EXTRA

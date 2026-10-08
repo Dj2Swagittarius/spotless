@@ -4,6 +4,7 @@ import path from 'path';
 import type { NextRequest } from 'next/server';
 import { getDb } from './db';
 import { getMusicDir } from './scanner';
+import { APP_VERSION } from './version';
 
 /**
  * Subsonic-compatible API support (see /rest/[...view]/route.ts).
@@ -125,7 +126,7 @@ export function subsonicResponse(
     status,
     version: SUBSONIC_VERSION,
     type: SERVER,
-    serverVersion: '0.2.0',
+    serverVersion: APP_VERSION,
     openSubsonic: true,
     ...body,
   };

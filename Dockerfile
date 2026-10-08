@@ -1,6 +1,9 @@
 # ---- build stage ----
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
+# Set by CI (docker.yml) to the commit being built; shown in Settings → About and /api/health.
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -11,6 +14,8 @@ RUN npm run build
 # ---- runtime stage ----
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
 
 # ffmpeg powers on-the-fly transcoding for Subsonic mobile clients;
 # gosu lets the entrypoint drop from root to the node user after fixing /data ownership.

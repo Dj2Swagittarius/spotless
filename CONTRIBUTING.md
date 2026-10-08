@@ -70,3 +70,16 @@ own (git-ignored) addresses.
 - Keep the UI copy as it is unless the change is about the copy.
 
 Security issues should not be filed as public issues; see [SECURITY.md](SECURITY.md).
+
+## Releasing
+
+Versions follow [SemVer](https://semver.org/): patch for fixes, minor for features, major for breaking changes.
+`package.json` is the only place the number lives; everything else (Settings → About, `/api/health`, the Subsonic
+`serverVersion`, image tags, GitHub Releases) reads it from there.
+
+1. Make sure the `## [Unreleased]` section of `CHANGELOG.md` describes what is shipping.
+2. On a clean `main` checkout run `npm run release -- minor` (or `patch`, `major`, or an explicit `1.2.3`).
+   Add `--dry-run` to see what it would do. It bumps `package.json`, dates the changelog section, commits
+   `Release vX.Y.Z` and creates the annotated tag `vX.Y.Z`.
+3. Push with `git push origin main --follow-tags`. CI then builds the image tagged `:X.Y.Z`, `:X.Y` and `:latest`,
+   and the release workflow creates a GitHub Release with that changelog section as its notes.

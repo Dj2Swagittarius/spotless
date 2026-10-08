@@ -5,6 +5,10 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- The app version comes from package.json alone and is shown in Settings → About, in `/api/health` (with the build commit) and as the Subsonic `serverVersion`. `npm run release -- <major|minor|patch>` bumps it, dates this changelog and tags the commit; CI turns the tag into versioned image tags and a GitHub Release.
+
+## [0.2.0] - 2026-10-08
+
 - Playlists are owned per profile; other profiles can no longer modify or delete them.
 - Tracks keep their likes, history and playlist entries when a file is renamed or moved (relink instead of delete + re-add).
 - Subsonic: `getMusicDirectory`, OpenSubsonic extension advertisement and POST request bodies are supported.
