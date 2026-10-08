@@ -78,7 +78,7 @@ export function nextPosition(db: Database.Database, playlistId: number): number 
  */
 export function resolvePlaceholders(db: Database.Database, playlistId?: number): number {
   const rows = (
-    playlistId
+    playlistId !== undefined
       ? db.prepare('SELECT * FROM playlist_placeholders WHERE playlist_id = ?').all(playlistId)
       : db.prepare('SELECT * FROM playlist_placeholders').all()
   ) as { id: number; playlist_id: number; position: number; title: string; artist: string; album: string; duration: number }[];

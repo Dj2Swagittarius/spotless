@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { TRACK_SELECT } from '@/lib/data';
+import type { Track } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +15,8 @@ export async function GET(req: NextRequest) {
     .map(Number)
     .filter(Number.isInteger)
     .slice(0, 500);
-  const limit = Math.min(Number(req.nextUrl.searchParams.get('limit')) || 15, 30);
+  const requested = Number(req.nextUrl.searchParams.get('limit'));
+  const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 30) : 15;
 
   const db = getDb();
   const seed = Number.isInteger(seedId)
@@ -24,21 +27,14 @@ export async function GET(req: NextRequest) {
 
   const notIn = exclude.length ? `AND t.id NOT IN (${exclude.join(',')})` : '';
 
+  // same column set as every other track endpoint so radio-queued tracks carry gain etc.
   const pick = (where: string, params: unknown[], n: number) =>
-    db
-      .prepare(
-        `SELECT t.id, t.title, t.duration, t.track_no AS trackNo, t.disc_no AS discNo, t.genre,
-                t.artist_id AS artistId, ar.name AS artist, t.album_id AS albumId, al.name AS album
-         FROM tracks t JOIN artists ar ON ar.id = t.artist_id JOIN albums al ON al.id = t.album_id
-         WHERE ${where} ${notIn}
-         ORDER BY RANDOM() LIMIT ?`
-      )
-      .all(...params, n);
+    db.prepare(`${TRACK_SELECT} WHERE ${where} ${notIn} ORDER BY RANDOM() LIMIT ?`).all(...params, n) as Track[];
 
-  const out: unknown[] = [];
+  const out: Track[] = [];
   const seen = new Set(exclude);
-  const add = (rows: unknown[]) => {
-    for (const r of rows as { id: number }[]) {
+  const add = (rows: Track[]) => {
+    for (const r of rows) {
       if (!seen.has(r.id)) {
         seen.add(r.id);
         out.push(r);

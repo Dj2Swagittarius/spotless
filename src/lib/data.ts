@@ -1,7 +1,10 @@
+import type { NextRequest } from 'next/server';
 import { getDb } from './db';
+import { userIdFrom } from './user';
 import type { Track, Album, Artist, Playlist, HomeSection } from './types';
 
-const TRACK_SELECT = `
+/** Column list every track-returning endpoint shares, so clients always see the same shape (incl. gain). */
+export const TRACK_SELECT = `
   SELECT t.id, t.title, t.duration, t.track_no AS trackNo, t.disc_no AS discNo, t.genre, t.gain,
          t.artist_id AS artistId, ar.name AS artist,
          t.album_id AS albumId, al.name AS album
@@ -12,6 +15,33 @@ const TRACK_SELECT = `
 
 export function getTrack(id: number): Track | undefined {
   return getDb().prepare(`${TRACK_SELECT} WHERE t.id = ?`).get(id) as Track | undefined;
+}
+
+/** True for better-sqlite3 errors raised by a foreign-key violation (e.g. a track id that no longer exists). */
+export function isFkError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY';
+}
+
+export const PLAYLIST_NAME_MAX = 200;
+export const PLAYLIST_DESCRIPTION_MAX = 2000;
+
+/** Trim and cap a free-text field from a JSON body; null when the value is not a string so callers can reject it. */
+export function textField(value: unknown, max: number): string | null {
+  return typeof value === 'string' ? value.trim().slice(0, max) : null;
+}
+
+/**
+ * Resolve a playlist id from a route param, but only if the playlist belongs to the request's user.
+ * Returns null for a malformed id, an unknown playlist, or someone else's playlist, so callers
+ * answer 404 in all three cases and never reveal which one it was.
+ */
+export function ownedPlaylistId(req: NextRequest, raw: string): number | null {
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const row = getDb().prepare('SELECT id FROM playlists WHERE id = ? AND user_id = ?').get(id, userIdFrom(req)) as
+    | { id: number }
+    | undefined;
+  return row ? row.id : null;
 }
 
 export function getAlbums(): Album[] {
@@ -148,6 +178,30 @@ function playlistArtIds(playlistId: number): number[] {
   ).map((r) => r.id);
 }
 
+/** Cover-art album ids (first 4 by position) for every playlist of a user, in one query instead of one per playlist. */
+function playlistArtIdsByUser(userId: number): Map<number, number[]> {
+  const rows = getDb()
+    .prepare(
+      `SELECT playlistId, albumId FROM (
+         SELECT pt.playlist_id AS playlistId, t.album_id AS albumId,
+                ROW_NUMBER() OVER (PARTITION BY pt.playlist_id ORDER BY MIN(pt.position)) AS rn
+         FROM playlist_tracks pt
+         JOIN playlists p ON p.id = pt.playlist_id
+         JOIN tracks t ON t.id = pt.track_id
+         WHERE p.user_id = ?
+         GROUP BY pt.playlist_id, t.album_id
+       ) WHERE rn <= 4 ORDER BY playlistId, rn`
+    )
+    .all(userId) as { playlistId: number; albumId: number }[];
+  const byPlaylist = new Map<number, number[]>();
+  for (const r of rows) {
+    const list = byPlaylist.get(r.playlistId) ?? [];
+    list.push(r.albumId);
+    byPlaylist.set(r.playlistId, list);
+  }
+  return byPlaylist;
+}
+
 export function getPlaylists(userId: number): Playlist[] {
   const lists = getDb()
     .prepare(
@@ -161,11 +215,15 @@ export function getPlaylists(userId: number): Playlist[] {
        GROUP BY p.id ORDER BY p.created_at DESC`
     )
     .all(userId) as Playlist[];
-  for (const p of lists) p.artIds = playlistArtIds(p.id);
+  const art = playlistArtIdsByUser(userId);
+  for (const p of lists) p.artIds = art.get(p.id) ?? [];
   return lists;
 }
 
-export function getPlaylist(id: number): (Playlist & { tracks: Track[] }) | null {
+/** One playlist with its tracks; when userId is given, only that user's playlist is returned. */
+export function getPlaylist(id: number, userId?: number): (Playlist & { tracks: Track[] }) | null {
+  const ownerClause = userId === undefined ? '' : 'AND p.user_id = ?';
+  const params = userId === undefined ? [id] : [id, userId];
   const pl = getDb()
     .prepare(
       `SELECT p.id, p.name, p.description, p.created_at AS createdAt,
@@ -174,9 +232,9 @@ export function getPlaylist(id: number): (Playlist & { tracks: Track[] }) | null
        FROM playlists p
        LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
        LEFT JOIN tracks t ON t.id = pt.track_id
-       WHERE p.id = ? GROUP BY p.id`
+       WHERE p.id = ? ${ownerClause} GROUP BY p.id`
     )
-    .get(id) as Playlist | undefined;
+    .get(...params) as Playlist | undefined;
   if (!pl) return null;
   // real tracks and placeholders (songs not in the library) share one position space
   const real = getDb()
@@ -228,20 +286,20 @@ export function getHome(userId: number): HomeSection[] {
   const recent = db
     .prepare(
       `${TRACK_SELECT}
-       JOIN (SELECT track_id, MAX(played_at) AS lp FROM history WHERE user_id = ${userId} GROUP BY track_id ORDER BY lp DESC LIMIT 12) r
+       JOIN (SELECT track_id, MAX(played_at) AS lp FROM history WHERE user_id = ? GROUP BY track_id ORDER BY lp DESC LIMIT 12) r
          ON r.track_id = t.id
        ORDER BY r.lp DESC`
     )
-    .all() as Track[];
+    .all(userId) as Track[];
   if (recent.length > 0) sections.push({ title: 'Recently played', kind: 'tracks', tracks: recent });
 
   const top = db
     .prepare(
       `${TRACK_SELECT}
-       JOIN history h ON h.track_id = t.id AND h.user_id = ${userId}
+       JOIN history h ON h.track_id = t.id AND h.user_id = ?
        GROUP BY t.id ORDER BY COUNT(h.id) DESC LIMIT 12`
     )
-    .all() as Track[];
+    .all(userId) as Track[];
   if (top.length > 0) sections.push({ title: 'Your top tracks', kind: 'tracks', tracks: top });
 
   // mixes by top artists from history (fallback: random artists)
@@ -249,10 +307,10 @@ export function getHome(userId: number): HomeSection[] {
     .prepare(
       `SELECT t.artist_id AS id, ar.name FROM history h
        JOIN tracks t ON t.id = h.track_id JOIN artists ar ON ar.id = t.artist_id
-       WHERE h.user_id = ${userId}
+       WHERE h.user_id = ?
        GROUP BY t.artist_id ORDER BY COUNT(h.id) DESC LIMIT 4`
     )
-    .all() as { id: number; name: string }[];
+    .all(userId) as { id: number; name: string }[];
   if (mixArtists.length < 4) {
     const extra = db
       .prepare(
@@ -297,14 +355,14 @@ export function getHome(userId: number): HomeSection[] {
   const forgotten = db
     .prepare(
       `${TRACK_SELECT}
-       LEFT JOIN likes l ON l.track_id = t.id AND l.user_id = ${userId}
-       JOIN history h ON h.track_id = t.id AND h.user_id = ${userId}
+       LEFT JOIN likes l ON l.track_id = t.id AND l.user_id = ?
+       JOIN history h ON h.track_id = t.id AND h.user_id = ?
        GROUP BY t.id
        HAVING (COUNT(h.id) >= 3 OR l.track_id IS NOT NULL)
           AND MAX(h.played_at) < datetime('now', '-60 days')
        ORDER BY RANDOM() LIMIT 25`
     )
-    .all() as Track[];
+    .all(userId, userId) as Track[];
   if (forgotten.length >= 5) sections.push({ title: 'Forgotten favorites', kind: 'mix', tracks: forgotten });
 
   const newAlbums = db
