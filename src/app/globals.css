@@ -56,8 +56,8 @@ body {
 /* keyboard focus: visible ring, only for keyboard (not mouse clicks) */
 :focus-visible {
   outline: 2px solid #1db954;
+  /* no border-radius here: it squared off rounded-full controls; the outline follows the element's own radius */
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
 /* faster taps + no accidental double-tap zoom on controls */
@@ -96,9 +96,12 @@ input[type='range']::-webkit-slider-thumb {
   background: #fff;
   opacity: 0;
 }
-input[type='range']:hover::-webkit-slider-thumb {
+/* the thumb is the only visual the keyboard user has: show it on focus as well as hover */
+input[type='range']:hover::-webkit-slider-thumb,
+input[type='range']:focus-visible::-webkit-slider-thumb {
   opacity: 1;
 }
-input[type='range']:hover {
+input[type='range']:hover,
+input[type='range']:focus-visible {
   background: linear-gradient(to right, #1db954 var(--fill, 0%), #4d4d4d var(--fill, 0%));
 }
