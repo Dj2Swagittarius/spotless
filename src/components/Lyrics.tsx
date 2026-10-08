@@ -23,17 +23,25 @@ export default function Lyrics({ trackId, progress }: { trackId: number; progres
   const activeRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    // abort the in-flight lookup when the track changes, so a slow answer for the previous
+    // song cannot land on top of the current one
+    const ac = new AbortController();
     setLoading(true);
     setSynced(null);
     setPlain(null);
-    fetch(`/api/lyrics/${trackId}`)
+    fetch(`/api/lyrics/${trackId}`, { signal: ac.signal })
       .then((r) => r.json())
       .then((d) => {
+        if (ac.signal.aborted) return;
         if (d.synced) setSynced(parseLrc(d.synced));
         else if (d.plain) setPlain(d.plain);
+        setLoading(false);
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
   }, [trackId]);
 
   const activeIndex = useMemo(() => {

@@ -92,6 +92,17 @@ export function attachEq(el: HTMLAudioElement | null) {
   ctx?.resume().catch(() => {});
 }
 
+/**
+ * Resume the AudioContext from inside a user gesture. Browsers create (or leave) the
+ * context suspended until a gesture reaches it, and a suspended context silences every
+ * element routed through the EQ chain — so the play controls call this before playing.
+ * No-op until the EQ has been attached to something.
+ */
+export function resumeEq(): void {
+  if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
+  ctx.resume().catch(() => {});
+}
+
 /** Persist + apply new EQ state to every attached element. */
 export function saveEq(state: EqState) {
   try {
