@@ -2,16 +2,25 @@ import fs from 'fs';
 import path from 'path';
 import { resolvePlaceholders } from './playlistMatch';
 import { getDb, artDir, getSetting, setSetting } from './db';
+import { imageContentType } from './art';
 
 const DEFAULT_MUSIC_DIR = process.env.MUSIC_DIR || path.join(process.cwd(), 'music');
 const EXTS = new Set(['.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac']);
+// readdir/stat calls in flight at once: enough to hide NAS latency without flooding it
+const WALK_CONCURRENCY = 6;
+// track upserts per transaction; one fsync per batch instead of one per row
+const UPSERT_BATCH = 200;
+// embedded pictures larger than this are almost certainly not cover art (or are corrupt)
+const MAX_EMBEDDED_ART_BYTES = 10 * 1024 * 1024;
+// a re-encoded or re-tagged copy of the same song may differ by a fraction of a second
+const RELINK_DURATION_TOLERANCE_S = 1.5;
 
 const AUTO_SCAN_SETTING = 'library_auto_scan_minutes';
 export const AUTO_SCAN_INTERVALS = [0, 5, 15, 30, 60, 180, 360, 720, 1440] as const;
 export type AutoScanIntervalMinutes = (typeof AUTO_SCAN_INTERVALS)[number];
 const AUTO_SCAN_ALLOWED = new Set<number>(AUTO_SCAN_INTERVALS);
 
-type LastScan = { at: string; added: number; removed: number; total: number };
+type LastScan = { at: string; added: number; removed: number; relinked: number; total: number };
 type LastScanError = { at: string; message: string };
 type ScannerRuntime = {
   scanning: boolean;
@@ -151,6 +160,20 @@ function primaryArtistName(c: {
   return name || 'Unknown Artist';
 }
 
+const albumArtFile = (albumId: number) => path.join(artDir(), `${albumId}.img`);
+const artistArtFile = (artistId: number) => path.join(artDir(), `artist-${artistId}.img`);
+
+/** Remove cached art for rows that no longer exist. A missing file is the normal case. */
+function unlinkArtFiles(files: string[]): void {
+  for (const file of files) {
+    try {
+      fs.unlinkSync(file);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.warn(`scan: could not remove ${file}:`, err);
+    }
+  }
+}
+
 /**
  * Merge artists (and their albums) whose names normalize to the same thing —
  * "A feat. B" vs "A", case variants, etc. Idempotent; runs at the start of every scan
@@ -180,6 +203,8 @@ export function dedupeLibrary(db: ReturnType<typeof getDb>): void {
   const setYear = db.prepare('UPDATE albums SET year = COALESCE(year, ?) WHERE id = ?');
   const reparentAlbum = db.prepare('UPDATE albums SET artist_id = ? WHERE id = ?');
   const renameArtist = db.prepare('UPDATE artists SET name = ? WHERE id = ?');
+  // art of merged-away rows; unlinked only once the transaction has committed
+  const orphanArt: string[] = [];
 
   /** Merge duplicate albums under one artist (case/whitespace variants), keeping art + year. */
   const mergeAlbumsOf = (artistId: number) => {
@@ -203,6 +228,7 @@ export function dedupeLibrary(db: ReturnType<typeof getDb>): void {
       }
       if (al.year != null) setYear.run(al.year, kept.id);
       delAlbum.run(al.id);
+      orphanArt.push(albumArtFile(al.id));
     }
   };
 
@@ -243,10 +269,12 @@ export function dedupeLibrary(db: ReturnType<typeof getDb>): void {
           }
           if (al.year != null) setYear.run(al.year, existing.id);
           delAlbum.run(al.id);
+          orphanArt.push(albumArtFile(al.id));
         }
         moveCollections.run(keeper.id, dup.id);
         dropCollections.run(dup.id);
         delArtist.run(dup.id);
+        orphanArt.push(artistArtFile(dup.id));
       }
 
       // normalize the surviving name ("A feat. B" as the only entry → "A")
@@ -257,28 +285,194 @@ export function dedupeLibrary(db: ReturnType<typeof getDb>): void {
     }
   });
   tx();
+  unlinkArtFiles(orphanArt);
 }
+
+/** Minimal counting semaphore: runs at most `max` of the wrapped async calls at once. */
+function semaphore(max: number): <T>(fn: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiters: (() => void)[] = [];
+  return async (fn) => {
+    if (active >= max) await new Promise<void>((resolve) => waiters.push(resolve));
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      waiters.shift()?.();
+    }
+  };
+}
+
+type AudioFile = {
+  path: string;
+  /** Whole milliseconds; null when stat failed (file is kept but not re-read this scan). */
+  mtime: number | null;
+};
 
 /**
  * Collect audio files. The root must be readable (the caller checks); a subfolder that
  * can't be read is skipped and recorded in `unreadable`, so the removal phase keeps its
- * tracks instead of treating a permissions hiccup as deleted files.
+ * tracks instead of treating a permissions hiccup as deleted files. Directory reads and
+ * stats are async and bounded so a slow NAS never blocks the event loop for the whole walk.
  */
-function walk(dir: string, out: string[] = [], unreadable: string[] = []): string[] {
+async function walk(
+  dir: string,
+  out: AudioFile[],
+  unreadable: string[],
+  run: ReturnType<typeof semaphore>
+): Promise<void> {
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries = await run(() => fs.promises.readdir(dir, { withFileTypes: true }));
   } catch (err) {
     console.warn(`scan: cannot read ${dir}, keeping its tracks:`, err);
     unreadable.push(dir + path.sep);
-    return out;
+    return;
   }
+  const pending: Promise<void>[] = [];
   for (const e of entries) {
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) walk(full, out, unreadable);
-    else if (EXTS.has(path.extname(e.name).toLowerCase())) out.push(full);
+    if (e.isDirectory()) {
+      pending.push(walk(full, out, unreadable, run));
+    } else if (EXTS.has(path.extname(e.name).toLowerCase())) {
+      pending.push(
+        run(() => fs.promises.stat(full)).then(
+          (stat) => {
+            out.push({ path: full, mtime: Math.floor(stat.mtimeMs) });
+          },
+          () => {
+            out.push({ path: full, mtime: null });
+          }
+        )
+      );
+    }
   }
-  return out;
+  await Promise.all(pending);
+}
+
+type TrackRow = {
+  id: number;
+  path: string;
+  mtime: number;
+  album_id: number;
+  artist_id: number;
+  title: string;
+  track_no: number;
+  disc_no: number;
+  genre: string | null;
+  duration: number;
+  gain: number | null;
+  artist: string;
+  album: string;
+};
+
+const SELECT_TRACK_FOR_RELINK = `
+  SELECT t.id, t.path, t.mtime, t.album_id, t.artist_id, t.title, t.track_no, t.disc_no, t.genre,
+         t.duration, t.gain, ar.name AS artist, al.name AS album
+  FROM tracks t JOIN albums al ON al.id = t.album_id JOIN artists ar ON ar.id = t.artist_id`;
+
+/** Identity of a song independent of where its file lives; duration is checked separately. */
+const relinkKey = (t: TrackRow) => `${artistKey(t.artist)}|${albumKey(t.album)}|${foldText(t.title)}|${t.track_no}`;
+
+/**
+ * Track ids are what likes, history, playlists and lyrics point at, so a moved or
+ * renamed file must keep its row. Each `vanished` row (its path is gone) is matched
+ * one-to-one against the rows inserted this scan by folded artist + album + title +
+ * track number and a duration within RELINK_DURATION_TOLERANCE_S (exact wins). On a
+ * match the fresh row is dropped and the old row takes over the new file; whatever
+ * stays unmatched is really gone and is deleted. Everything runs in one transaction.
+ */
+export function relinkVanishedTracks(
+  db: ReturnType<typeof getDb>,
+  vanished: { id: number }[],
+  inserted: Iterable<string>
+): { relinked: number; removed: number } {
+  const byId = db.prepare(`${SELECT_TRACK_FOR_RELINK} WHERE t.id = ?`);
+  const byPath = db.prepare(`${SELECT_TRACK_FOR_RELINK} WHERE t.path = ?`);
+  const delTrack = db.prepare('DELETE FROM tracks WHERE id = ?');
+  const takeOver = db.prepare(`
+    UPDATE tracks SET path = @path, mtime = @mtime, album_id = @album_id, artist_id = @artist_id, title = @title,
+      track_no = @track_no, disc_no = @disc_no, genre = @genre, duration = @duration, gain = @gain
+    WHERE id = @id
+  `);
+
+  const tx = db.transaction(() => {
+    const candidates = new Map<string, TrackRow[]>();
+    for (const p of inserted) {
+      const row = byPath.get(p) as TrackRow | undefined;
+      if (!row) continue;
+      const key = relinkKey(row);
+      const list = candidates.get(key) ?? [];
+      list.push(row);
+      candidates.set(key, list);
+    }
+
+    let relinked = 0;
+    let removed = 0;
+    // ascending id: the oldest row (most likely to carry history) gets first pick
+    const old = vanished
+      .map((v) => byId.get(v.id) as TrackRow | undefined)
+      .filter((r): r is TrackRow => r !== undefined)
+      .sort((a, b) => a.id - b.id);
+    for (const row of old) {
+      const list = candidates.get(relinkKey(row)) ?? [];
+      let best: TrackRow | null = null;
+      let bestDiff = Number.POSITIVE_INFINITY;
+      for (const c of list) {
+        const diff = Math.abs(c.duration - row.duration);
+        if (diff <= RELINK_DURATION_TOLERANCE_S && diff < bestDiff) {
+          best = c;
+          bestDiff = diff;
+        }
+      }
+      if (!best) {
+        delTrack.run(row.id);
+        removed++;
+        continue;
+      }
+      list.splice(list.indexOf(best), 1);
+      // the new row goes first so the UNIQUE(path) slot is free for the old id
+      delTrack.run(best.id);
+      takeOver.run({
+        id: row.id,
+        path: best.path,
+        mtime: best.mtime,
+        album_id: best.album_id,
+        artist_id: best.artist_id,
+        title: best.title,
+        track_no: best.track_no,
+        disc_no: best.disc_no,
+        genre: best.genre,
+        duration: best.duration,
+        gain: best.gain,
+      });
+      relinked++;
+    }
+    return { relinked, removed };
+  });
+  return tx();
+}
+
+/** Embedded cover selection: the tagged front cover when there is one, else the first picture. */
+function pickEmbeddedArt(pictures: { data: Uint8Array; type?: string }[]): Buffer | null {
+  const pic = pictures.find((p) => p.type === 'Cover (front)') ?? pictures[0];
+  if (!pic || pic.data.length === 0 || pic.data.length > MAX_EMBEDDED_ART_BYTES) return null;
+  const buf = Buffer.from(pic.data);
+  return imageContentType(buf) ? buf : null;
+}
+
+/** Write cover art via temp file + rename so a crash never leaves a truncated image. */
+function writeArtAtomic(file: string, buf: Buffer): void {
+  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(temp, buf);
+    // Windows cannot rename over an existing file; a stale has_art=0 leftover is safe to drop
+    fs.rmSync(file, { force: true });
+    fs.renameSync(temp, file);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
 }
 
 export async function scanLibrary(options: { automatic?: boolean } = {}): Promise<void> {
@@ -291,7 +485,10 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
     const db = getDb();
     // TS resolves the browser entry which lacks parseFile; runtime (node) has it
     const { parseFile } = (await import('music-metadata')) as unknown as {
-      parseFile: (path: string, opts?: { duration?: boolean }) => Promise<import('music-metadata').IAudioMetadata>;
+      parseFile: (
+        path: string,
+        opts?: { duration?: boolean; skipCovers?: boolean }
+      ) => Promise<import('music-metadata').IAudioMetadata>;
     };
     // fold pre-existing duplicate artists/albums together before matching new files
     dedupeLibrary(db);
@@ -302,11 +499,18 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
     fs.accessSync(musicDir, fs.constants.R_OK);
 
     const unreadable: string[] = [];
-    const files = walk(musicDir, [], unreadable);
-    const fileSet = new Set(files);
+    const files: AudioFile[] = [];
+    await walk(musicDir, files, unreadable, semaphore(WALK_CONCURRENCY));
+    // the concurrent walk finishes in I/O order; sort so scans are reproducible
+    files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const fileSet = new Set(files.map((f) => f.path));
 
-    // remove tracks whose files vanished
-    const existing = db.prepare('SELECT id, path FROM tracks').all() as { id: number; path: string }[];
+    const existing = db.prepare('SELECT id, path, mtime FROM tracks').all() as {
+      id: number;
+      path: string;
+      mtime: number;
+    }[];
+    const knownMtime = new Map(existing.map((t) => [t.path, t.mtime]));
 
     // A temporarily missing bind/NAS mount can appear as a perfectly readable but
     // empty directory. Never let an unattended automatic scan erase a previously
@@ -316,16 +520,12 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
       throw new Error(`Automatic scan aborted: music directory is empty (${musicDir})`);
     }
 
-    let removed = 0;
-    const delTrack = db.prepare('DELETE FROM tracks WHERE id = ?');
-    for (const row of existing) {
-      if (!fileSet.has(row.path) && !unreadable.some((d) => row.path.startsWith(d))) {
-        delTrack.run(row.id);
-        removed++;
-      }
-    }
+    // Rows whose file is gone are NOT deleted yet: after the upsert phase they get a
+    // chance to adopt a freshly inserted file (rename/move) so their id survives.
+    const vanished = existing.filter(
+      (row) => !fileSet.has(row.path) && !unreadable.some((d) => row.path.startsWith(d))
+    );
 
-    const getMtime = db.prepare('SELECT mtime FROM tracks WHERE path = ?');
     // folded-key lookups so "MGK"/"mgk" and "Tiësto"/"Tiesto" don't fork entries
     // (COLLATE NOCASE can't fold diacritics, so match in memory instead)
     const insArtist = db.prepare('INSERT INTO artists (name) VALUES (?) RETURNING id');
@@ -352,21 +552,42 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
         genre = excluded.genre, mtime = excluded.mtime, gain = excluded.gain
     `);
 
-    let added = 0;
+    type TrackUpsert = {
+      title: string;
+      albumId: number;
+      artistId: number;
+      duration: number;
+      trackNo: number;
+      discNo: number;
+      genre: string | null;
+      path: string;
+      mtime: number;
+      gain: number | null;
+    };
+    let batch: TrackUpsert[] = [];
+    const flushBatch = db.transaction((rows: TrackUpsert[]) => {
+      for (const row of rows) upTrack.run(row);
+    });
+    const flush = async () => {
+      if (batch.length === 0) return;
+      flushBatch(batch);
+      batch = [];
+      // let queued HTTP requests (streams, status polls) run between batches
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    };
+
+    const inserted: string[] = [];
     let changed = 0;
-    for (const file of files) {
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(file);
-      } catch {
-        continue;
-      }
-      const mtime = Math.floor(stat.mtimeMs);
-      const known = getMtime.get(file) as { mtime: number } | undefined;
-      if (known && known.mtime === mtime) continue;
+    for (const { path: file, mtime } of files) {
+      if (mtime === null) continue;
+      const known = knownMtime.get(file);
+      if (known === mtime) continue;
 
       try {
-        const meta = await parseFile(file, { duration: true });
+        // Covers are the bulk of the bytes a tag parse copies around, and most albums
+        // already have art; the picture is fetched in a second cheap pass (no duration
+        // scan) only when the album the file belongs to still lacks it.
+        const meta = await parseFile(file, { duration: true, skipCovers: true });
         const c = meta.common;
         const artistName = primaryArtistName(c);
         const albumName = (c.album || 'Unknown Album').trim() || 'Unknown Album';
@@ -387,14 +608,17 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
           albumsByKey.set(alKey, album);
         }
 
-        if (!album.has_art && c.picture && c.picture.length > 0) {
-          const pic = c.picture[0];
-          fs.writeFileSync(path.join(artDir(), `${album.id}.img`), Buffer.from(pic.data));
-          setArt.run(album.id);
-          album.has_art = 1;
+        if (!album.has_art) {
+          const pictures = (await parseFile(file, { duration: false, skipCovers: false })).common.picture;
+          const art = pictures && pictures.length > 0 ? pickEmbeddedArt(pictures) : null;
+          if (art) {
+            writeArtAtomic(albumArtFile(album.id), art);
+            setArt.run(album.id);
+            album.has_art = 1;
+          }
         }
 
-        upTrack.run({
+        batch.push({
           title,
           albumId: album.id,
           artistId,
@@ -407,17 +631,33 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
           gain: c.replaygain_track_gain?.dB ?? null,
         });
         changed++;
-        if (!known) added++;
+        if (known === undefined) inserted.push(file);
+        if (batch.length >= UPSERT_BATCH) await flush();
       } catch (err) {
         console.warn(`scan: failed to parse ${file}:`, err);
       }
     }
+    await flush();
 
-    // prune empty albums/artists
-    db.exec(`
-      DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks);
-      DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks);
-    `);
+    // moved/renamed files keep their old id (likes, history, playlists, lyrics);
+    // only rows that found no new home are removed
+    const { relinked, removed } = relinkVanishedTracks(db, vanished, inserted);
+    const added = inserted.length - relinked;
+
+    // prune empty albums/artists, then their cached art
+    const emptyAlbums = db
+      .prepare('SELECT id FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)')
+      .all() as { id: number }[];
+    const emptyArtists = db
+      .prepare('SELECT id FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks)')
+      .all() as { id: number }[];
+    db.transaction(() => {
+      db.exec(`
+        DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks);
+        DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks);
+      `);
+    })();
+    unlinkArtFiles([...emptyAlbums.map((a) => albumArtFile(a.id)), ...emptyArtists.map((a) => artistArtFile(a.id))]);
 
     // playlist placeholders (Spotify imports) fill in once the song lands in the library
     try {
@@ -427,9 +667,9 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
     }
 
     const total = (db.prepare('SELECT COUNT(*) AS n FROM tracks').get() as { n: number }).n;
-    runtime.lastScan = { at: new Date().toISOString(), added, removed, total };
+    runtime.lastScan = { at: new Date().toISOString(), added, removed, relinked, total };
     runtime.lastScanError = null;
-    console.log(`scan: done. +${added} -${removed}, total ${total}`);
+    console.log(`scan: done. +${added} -${removed} ~${relinked} relinked, total ${total}`);
 
     // Preserve the existing behavior for startup/manual/webhook scans. Automatic
     // scans only trigger remote artwork backfill when the library actually changed,
