@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSpotifyRedirectConfig, saveSpotifyRedirectOrigin } from '@/lib/spotify';
-import { requireAdmin } from '@/lib/user';
+import { isAdmin, requireAdmin } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return NextResponse.json(getSpotifyRedirectConfig());
+// Only the admin edits the OAuth origin; other profiles see where it comes from but not the host itself.
+export async function GET(req: NextRequest) {
+  const config = getSpotifyRedirectConfig();
+  if (isAdmin(req)) return NextResponse.json(config);
+  return NextResponse.json({ customOrigin: null, origin: null, redirectUri: null, source: config.source });
 }
 
 export async function PUT(req: NextRequest) {

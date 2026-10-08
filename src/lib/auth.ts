@@ -162,12 +162,57 @@ export function revokeUserSessions(userId: number): void {
   getDb().prepare('DELETE FROM auth_sessions WHERE user_id = ?').run(userId);
 }
 
-function secureCookieFor(req: NextRequest): boolean {
+/** First value of a comma-separated forwarding header, or null when absent/empty. */
+function firstForwarded(req: NextRequest, name: string): string | null {
+  const value = req.headers.get(name)?.split(',')[0]?.trim();
+  return value ? value : null;
+}
+
+/**
+ * Whether cookies must carry the Secure flag. X-Forwarded-Proto is honoured even without
+ * TRUST_PROXY: a forged header can only make a cookie stricter, never expose it over http.
+ */
+export function secureCookieFor(req: NextRequest): boolean {
   const override = process.env.AUTH_SECURE_COOKIE?.trim().toLowerCase();
   if (override === 'true' || override === '1' || override === 'yes') return true;
   if (override === 'false' || override === '0' || override === 'no') return false;
-  const forwardedProto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
+  const forwardedProto = firstForwarded(req, 'x-forwarded-proto')?.toLowerCase();
   return forwardedProto === 'https' || req.nextUrl.protocol === 'https:';
+}
+
+/**
+ * Reverse-proxy hops whose X-Forwarded-* headers may be believed (TRUST_PROXY).
+ * 0 means no proxy is trusted and forwarded headers are treated as client-controlled.
+ */
+export function trustedProxyHops(): number {
+  const hops = Number(process.env.TRUST_PROXY);
+  return Number.isInteger(hops) && hops >= 1 ? hops : 0;
+}
+
+// host[:port] or [ipv6][:port]; rejects anything that could smuggle a scheme, userinfo or path
+const HOST_PATTERN = /^(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::\d{1,5})?$/i;
+
+/**
+ * Public origin of this request, for building absolute callback/redirect URLs. X-Forwarded-Host
+ * is only believed behind a trusted proxy (TRUST_PROXY): a forged host would point OAuth
+ * callbacks at an attacker's server. The scheme follows the same decision as secureCookieFor,
+ * because a Secure cookie set alongside the redirect only travels back over https.
+ * The Host header is preferred over nextUrl, which rewrites loopback addresses to "localhost":
+ * a cookie set while browsing 127.0.0.1 would never reach a callback issued to localhost.
+ */
+export function requestOrigin(req: NextRequest): string {
+  const hostHeader = req.headers.get('host')?.trim();
+  let host = hostHeader && HOST_PATTERN.test(hostHeader) ? hostHeader : req.nextUrl.host;
+  let protocol = req.nextUrl.protocol;
+  if (trustedProxyHops() > 0) {
+    const forwardedHost = firstForwarded(req, 'x-forwarded-host');
+    if (forwardedHost && HOST_PATTERN.test(forwardedHost)) host = forwardedHost;
+    const forwardedProto = firstForwarded(req, 'x-forwarded-proto')?.toLowerCase();
+    if (forwardedProto === 'http' || forwardedProto === 'https') protocol = `${forwardedProto}:`;
+  }
+  if (secureCookieFor(req)) protocol = 'https:';
+  if (!host) return req.nextUrl.origin;
+  return `${protocol}//${host}`;
 }
 
 export function setSessionCookie(res: NextResponse, req: NextRequest, token: string): void {
@@ -202,8 +247,8 @@ export function clearSessionCookie(res: NextResponse, req: NextRequest): void {
  * Without it every request shares one bucket, so throttling is per profile.
  */
 export function clientIp(req: NextRequest): string {
-  const hops = Number(process.env.TRUST_PROXY);
-  if (!Number.isInteger(hops) || hops < 1) return 'direct';
+  const hops = trustedProxyHops();
+  if (hops < 1) return 'direct';
   const chain = (req.headers.get('x-forwarded-for') ?? '')
     .split(',')
     .map((s) => s.trim())

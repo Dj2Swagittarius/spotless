@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listPlaylists, importPlaylist } from '@/lib/spotify';
+import { listPlaylists, importPlaylist, spotifyErrorResponse } from '@/lib/spotify';
 import { userIdFrom } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   try {
     return NextResponse.json(await listPlaylists(userIdFrom(req)));
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 400 });
+    return spotifyErrorResponse(err);
   }
 }
 
@@ -20,6 +20,6 @@ export async function POST(req: NextRequest) {
   try {
     return NextResponse.json(await importPlaylist(userIdFrom(req), id, name));
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 400 });
+    return spotifyErrorResponse(err);
   }
 }
