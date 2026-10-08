@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { usePlayer } from '@/store/player';
 import { useLikes } from '@/store/likes';
 import { fmtDuration } from '@/lib/format';
-import { attachEq } from '@/lib/eq';
+import { attachEq, resumeEq } from '@/lib/eq';
 import {
   RUNGS,
   currentRung,
@@ -62,6 +62,36 @@ const MAX_RESTREAMS_PER_TRACK = 4;
 // held back — enough lead time for the gapless/crossfade handoff, without spending the
 // whole song downloading two streams over one weak connection.
 const PRELOAD_LEAD_S = 45;
+// A track counts as played (history row + scrobble) once this much of it has actually
+// been heard: half the song, or four minutes for long ones — the Last.fm rule.
+const PLAYED_CAP_S = 240;
+// A timeupdate gap larger than this is a seek or a source swap, not listening.
+const MAX_LISTEN_DELTA_S = 2;
+// Keyboard seek step for the arrow keys.
+const KEY_SEEK_S = 5;
+
+type HistoryEvent = 'start' | 'played';
+
+/** Live stations and playlist placeholders never go to history or Last.fm. */
+function isLibraryTrack(t: Track | null | undefined): t is Track {
+  return !!t && t.id > 0 && !t.streamUrl;
+}
+
+function postHistory(t: Track, event: HistoryEvent, startedAt?: number) {
+  if (!isLibraryTrack(t)) return;
+  fetch('/api/history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trackId: t.id, event, startedAt: startedAt && startedAt > 0 ? startedAt : undefined }),
+  }).catch(() => {});
+}
+
+/** True when a keydown happened in something that takes typing (or has its own key handling). */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return !!target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+}
 
 export default function Player() {
   const audioARef = useRef<HTMLAudioElement>(null);
@@ -72,11 +102,38 @@ export default function Player() {
   const radioFetchingRef = useRef(false);
   const lastSwitchRef = useRef(0);
   const restreamsRef = useRef(0);
+  // pending "seek once metadata is in" for a raw-rung restream, so it can be dropped when
+  // the element moves on to another stream before the metadata ever arrives
+  const resumeSeekRef = useRef<{ el: HTMLAudioElement; handler: () => void } | null>(null);
+  // listening bookkeeping for the current play of the current track
+  const listenedRef = useRef(0); // seconds actually heard (timeupdate deltas)
+  const lastPosRef = useRef<number | null>(null); // position at the previous timeupdate
+  const startPostedRef = useRef(false); // 'start' sent for this play
+  const playedPostedRef = useRef(false); // 'played' sent for this play
+  const startedAtRef = useRef(0); // unix seconds this play began
+  const mutedFromRef = useRef(1); // volume to come back to after the M key mutes
 
-  const { queue, index, isPlaying, shuffle, repeat, volume, radio } = usePlayer();
-  const { toggle, next, prev, jumpTo, toggleShuffle, cycleRepeat, setVolume, setPlaying, toggleRadio, appendTracks, moveInQueue } =
-    usePlayer();
-  const likes = useLikes();
+  const queue = usePlayer((s) => s.queue);
+  const index = usePlayer((s) => s.index);
+  const isPlaying = usePlayer((s) => s.isPlaying);
+  const shuffle = usePlayer((s) => s.shuffle);
+  const repeat = usePlayer((s) => s.repeat);
+  const volume = usePlayer((s) => s.volume);
+  const radio = usePlayer((s) => s.radio);
+  const toggle = usePlayer((s) => s.toggle);
+  const next = usePlayer((s) => s.next);
+  const prev = usePlayer((s) => s.prev);
+  const jumpTo = usePlayer((s) => s.jumpTo);
+  const toggleShuffle = usePlayer((s) => s.toggleShuffle);
+  const cycleRepeat = usePlayer((s) => s.cycleRepeat);
+  const setVolume = usePlayer((s) => s.setVolume);
+  const setPlaying = usePlayer((s) => s.setPlaying);
+  const toggleRadio = usePlayer((s) => s.toggleRadio);
+  const appendTracks = usePlayer((s) => s.appendTracks);
+  const moveInQueue = usePlayer((s) => s.moveInQueue);
+  const likedIds = useLikes((s) => s.ids);
+  const toggleLike = useLikes((s) => s.toggle);
+  const likes = { ids: likedIds, toggle: toggleLike };
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showQueue, setShowQueue] = useState(false);
@@ -89,10 +146,26 @@ export default function Player() {
 
   const track = index >= 0 ? queue[index] : null;
   const isStation = Boolean(track?.streamUrl); // live internet radio: no seek, no like, no scrobble
-  const nextIndex = index + 1 < queue.length ? index + 1 : repeat === 'all' && queue.length > 0 ? 0 : -1;
+  // On a repeat-all wrap with shuffle on the store deals a new order, so the first track of
+  // the next lap is unknown until then — nothing to preload or crossfade into.
+  const wrapsToStart = repeat === 'all' && queue.length > 0 && !(shuffle && queue.length > 1);
+  const nextIndex = index + 1 < queue.length ? index + 1 : wrapsToStart ? 0 : -1;
   const nextTrack = nextIndex >= 0 ? queue[nextIndex] : null;
 
   const els = () => [audioARef.current, audioBRef.current] as const;
+
+  // restore the saved session once we are on the client (see skipHydration in the store):
+  // the queue comes back paused at the saved index, nothing starts playing by itself.
+  // With storage blocked (private mode) the middleware never attaches `persist` at all.
+  useEffect(() => {
+    usePlayer.persist?.rehydrate()?.catch(() => {});
+  }, []);
+
+  const clearResumeSeek = () => {
+    const pending = resumeSeekRef.current;
+    if (pending) pending.el.removeEventListener('loadedmetadata', pending.handler);
+    resumeSeekRef.current = null;
+  };
 
   // Each element remembers the rung and start offset of the stream it holds, so a
   // downshift can compare against what is actually playing (not what the ladder said
@@ -101,8 +174,11 @@ export default function Player() {
     RUNGS.find((r) => r.id === a?.dataset.rung) ?? currentRung();
   const offsetOf = (a: HTMLAudioElement | null) => Number(a?.dataset.offset ?? 0) || 0;
   const setSrc = (a: HTMLAudioElement, t: Track, rung: Rung, offset = 0) => {
+    if (resumeSeekRef.current?.el === a) clearResumeSeek(); // whatever was pending is for a stream that is gone
     a.dataset.rung = rung.id;
-    a.dataset.offset = String(offset);
+    // only a transcode starts the stream at `offset` (?offset=), so only then does the
+    // element's own clock need shifting; a raw file seeks instead and its clock is absolute
+    a.dataset.offset = rung.bitrate > 0 ? String(offset) : '0';
     a.src = t.streamUrl ?? `/api/stream/${t.id}${streamQuery(rung, offset)}`;
   };
   // match on the base path (ignoring the quality query) so changing quality mid-session
@@ -120,10 +196,32 @@ export default function Player() {
     setShowQueue(false);
   }, [pathname]);
 
+  /**
+   * Abort a crossfade in progress. The incoming element is parked (paused, rewound,
+   * silent) but keeps its src so the preload is not thrown away, and the active element
+   * gets its full volume back — otherwise a seek or a downshift mid-fade would leave
+   * both tracks audible, or the current one stuck half-faded.
+   */
   const cancelFade = () => {
     if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
     fadeTimerRef.current = null;
+    if (!fadingRef.current) return;
     fadingRef.current = false;
+    const a = els()[active];
+    const b = els()[1 - active];
+    if (b) {
+      b.pause();
+      b.volume = 0;
+      try {
+        b.currentTime = 0;
+        // a transcode pipe may not be seekable at all; reload it rather than start the
+        // next song a few seconds in later on (src stays, so hasSrc still matches)
+        if (b.currentTime > 1) b.load();
+      } catch {
+        // nothing loaded yet
+      }
+    }
+    if (a) a.volume = Math.min(1, volume * gainMult(track?.gain));
   };
 
   // EQ: route both elements through the filter chain (no-op until the user enables it);
@@ -135,10 +233,32 @@ export default function Player() {
     return () => window.removeEventListener('eq-changed', attach);
   }, []);
 
+  // drop a pending raw-rung resume seek when the player unmounts
+  useEffect(() => clearResumeSeek, []);
+
+  /** Forget the listening bookkeeping: a new track, or a replay of this one. */
+  const resetPlayTracking = () => {
+    listenedRef.current = 0;
+    lastPosRef.current = null;
+    startPostedRef.current = false;
+    playedPostedRef.current = false;
+    startedAtRef.current = 0;
+  };
+
+  /** Playback of the current track has begun (once per play): Last.fm "now playing". */
+  const markStarted = (t: Track) => {
+    if (startPostedRef.current || !isLibraryTrack(t)) return;
+    startPostedRef.current = true;
+    startedAtRef.current = Math.floor(Date.now() / 1000);
+    postHistory(t, 'start');
+  };
+
   // load current track into the active element (skip when a fade already put it there)
   useEffect(() => {
     const a = els()[active];
     if (!a || !track) return;
+    clearResumeSeek();
+    resetPlayTracking();
     // seed from the tagged length: a transcoded pipe may never report a usable duration
     setDuration(track.streamUrl ? 0 : track.duration || 0);
     restreamsRef.current = 0;
@@ -151,15 +271,11 @@ export default function Player() {
       }
       setSrc(a, track, currentRung());
       a.volume = Math.min(1, volume * gainMult(track.gain));
-      a.play().catch(() => {});
+      // a restored session lands here paused: load the track, don't start it
+      if (isPlaying) a.play().catch(() => {});
       setProgress(0);
     }
-    if (track.id > 0)
-      fetch('/api/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackId: track.id }),
-      }).catch(() => {});
+    if (isPlaying) markStarted(track);
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: track.title,
@@ -202,12 +318,20 @@ export default function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.id, radio]);
 
-  // play/pause sync on the active element
+  // play/pause sync on the active element — and on the incoming one while a crossfade
+  // is running, so pausing mid-fade silences both and resuming picks the fade back up
   useEffect(() => {
     const a = els()[active];
     if (!a || !track) return;
-    if (isPlaying) a.play().catch(() => {});
-    else a.pause();
+    const b = fadingRef.current ? els()[1 - active] : null;
+    if (isPlaying) {
+      resumeEq();
+      a.play().catch(() => {});
+      b?.play().catch(() => {});
+    } else {
+      a.pause();
+      b?.pause();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, active]);
 
@@ -217,13 +341,40 @@ export default function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [volume, active]);
 
+  // Per-render snapshot for listeners that are registered once (keyboard, media session
+  // seekto): they read through this instead of closing over a stale render.
+  const latest = useRef({ seek: (_v: number) => {}, progress, duration, volume, canSeek: false });
+
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
-    navigator.mediaSession.setActionHandler('play', () => setPlaying(true));
-    navigator.mediaSession.setActionHandler('pause', () => setPlaying(false));
-    navigator.mediaSession.setActionHandler('nexttrack', next);
-    navigator.mediaSession.setActionHandler('previoustrack', prev);
-  }, [next, prev, setPlaying]);
+    const ms = navigator.mediaSession;
+    ms.setActionHandler('play', () => {
+      resumeEq();
+      setPlaying(true);
+    });
+    ms.setActionHandler('pause', () => setPlaying(false));
+    ms.setActionHandler('nexttrack', next);
+    ms.setActionHandler('previoustrack', prev);
+    try {
+      ms.setActionHandler('seekto', (d) => {
+        if (d.seekTime != null && latest.current.canSeek) latest.current.seek(d.seekTime);
+      });
+    } catch {
+      // older browsers reject actions they don't know
+    }
+    ms.playbackState = isPlaying ? 'playing' : 'paused';
+  }, [next, prev, setPlaying, isPlaying]);
+
+  /** Tell the OS media controls where we are (lock screen scrubber); duration must be known. */
+  const updatePositionState = (pos: number, dur: number) => {
+    if (!('mediaSession' in navigator) || typeof navigator.mediaSession.setPositionState !== 'function') return;
+    if (!Number.isFinite(dur) || dur <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({ duration: dur, playbackRate: 1, position: Math.max(0, Math.min(dur, pos)) });
+    } catch {
+      // position outside duration, or no media session support for this
+    }
+  };
 
   const startFade = (cf: number) => {
     const a = els()[active];
@@ -237,10 +388,13 @@ export default function Player() {
     });
     let t = 0;
     fadeTimerRef.current = setInterval(() => {
+      // paused mid-fade: hold the curve where it is until playback resumes
+      if (!usePlayer.getState().isPlaying) return;
       t += 0.1;
       const k = Math.min(1, t / cf);
-      b.volume = Math.min(1, volume * gainMult(nextTrack?.gain)) * k;
-      a.volume = Math.min(1, volume * gainMult(track?.gain)) * (1 - k);
+      const vol = usePlayer.getState().volume; // live, so a volume change mid-fade is honoured
+      b.volume = Math.min(1, vol * gainMult(nextTrack?.gain)) * k;
+      a.volume = Math.min(1, vol * gainMult(track?.gain)) * (1 - k);
       if (k >= 1) {
         if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
         fadeTimerRef.current = null;
@@ -274,13 +428,18 @@ export default function Player() {
     if (rung.bitrate === 0 && at > 0) {
       // the original file is byte-range seekable, so it resumes by seeking rather than
       // by asking the server to start the stream somewhere else
-      a.addEventListener('loadedmetadata', () => {
+      const src = a.src;
+      const handler = () => {
+        resumeSeekRef.current = null;
+        if (a.src !== src) return; // element was reused for another stream in the meantime
         try {
           a.currentTime = at;
         } catch {
-          // element was reused for another track in the meantime
+          // not seekable after all
         }
-      }, { once: true });
+      };
+      resumeSeekRef.current = { el: a, handler };
+      a.addEventListener('loadedmetadata', handler, { once: true });
     }
     a.volume = Math.min(1, volume * gainMult(track.gain));
     setProgress(at);
@@ -306,16 +465,28 @@ export default function Player() {
     if (!track || track.streamUrl || a.seeking) return;
     if (Date.now() - lastSwitchRef.current < STALL_GRACE_MS) return; // our own source swap
     const auto = loadQuality() === 'auto';
-    if (auto) noteStall();
     const have = rungOf(a);
-    const want = auto ? currentRung() : have;
-    const at = offsetOf(a) + a.currentTime;
-    // at the very start of a track, buffering is just buffering — only act on it if the
-    // ladder has actually dropped below what we asked for
-    if (at <= 0 && !isLower(want, have)) return;
+    const want = auto ? currentRung() : have; // what the ladder says before this event is scored
+    // At the very start of a track, buffering is just buffering — never a stall. The only
+    // reason to act here is a ladder that already dropped below what we asked for.
+    const hasPlayed = a.played.length > 0 || a.currentTime > 0.5;
+    if (!hasPlayed) {
+      if (isLower(want, have)) restream(a, want);
+      return;
+    }
+    // Mid-track, only a genuine rebuffer counts: playing, and out of decoded audio.
+    // 'waiting' and 'stalled' also fire for a seek that outran the buffer, for a paused
+    // element the browser stopped fetching for, and for the fetch going quiet while
+    // plenty is still buffered.
+    if (a.paused || a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
+    let target = want;
+    if (auto) {
+      noteStall();
+      target = currentRung();
+    }
     // a raw file re-buffers on its own via byte ranges; a transcode never will
-    if (!isLower(want, have) && have.bitrate === 0) return;
-    restream(a, want);
+    if (!isLower(target, have) && have.bitrate === 0) return;
+    restream(a, target);
   };
 
   // a failed request used to end the song then and there — the element just sits at the
@@ -343,11 +514,29 @@ export default function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, track?.id, isPlaying, volume]);
 
+  /** Enough of the track heard? Then it goes on the record — once per play. */
+  const maybeMarkPlayed = (t: Track) => {
+    if (playedPostedRef.current || !isLibraryTrack(t)) return;
+    const threshold = duration > 0 ? Math.min(duration / 2, PLAYED_CAP_S) : PLAYED_CAP_S;
+    if (listenedRef.current < threshold) return;
+    playedPostedRef.current = true;
+    postHistory(t, 'played', startedAtRef.current);
+  };
+
   const onTime = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     const a = e.currentTarget;
     if (a !== els()[active]) return;
     const pos = offsetOf(a) + a.currentTime;
     setProgress(pos);
+    updatePositionState(pos, duration);
+    // count only continuous playback: a seek or a source swap jumps the clock and is skipped
+    const last = lastPosRef.current;
+    lastPosRef.current = pos;
+    if (last != null) {
+      const delta = pos - last;
+      if (delta > 0 && delta <= MAX_LISTEN_DELTA_S) listenedRef.current += delta;
+    }
+    if (track) maybeMarkPlayed(track);
     const cf = crossfadeSec();
     if (
       cf > 0 &&
@@ -367,8 +556,9 @@ export default function Player() {
     const d = a.duration;
     // live streams report Infinity; a transcode started at an offset reports only the
     // remainder (or nothing at all), so prefer the tagged length for library tracks
-    if (track && !track.streamUrl && track.duration > 0) setDuration(track.duration);
-    else setDuration(Number.isFinite(d) ? d + offsetOf(a) : 0);
+    const dur = track && !track.streamUrl && track.duration > 0 ? track.duration : Number.isFinite(d) ? d + offsetOf(a) : 0;
+    setDuration(dur);
+    updatePositionState(offsetOf(a) + a.currentTime, dur);
   };
 
   const onEnded = (e: React.SyntheticEvent<HTMLAudioElement>) => {
@@ -381,8 +571,11 @@ export default function Player() {
       if (track.duration - at > 5 && restream(a, wantedRung(a))) return;
     }
     if (repeat === 'one') {
+      // a replay is a fresh play as far as history and Last.fm are concerned
+      resetPlayTracking();
       a.currentTime = 0;
       a.play().catch(() => {});
+      if (track) markStarted(track);
       return;
     }
     const b = els()[1 - active];
@@ -399,6 +592,8 @@ export default function Player() {
   const onPlayPause = (e: React.SyntheticEvent<HTMLAudioElement>, playing: boolean) => {
     if (e.currentTarget !== els()[active] || fadingRef.current) return;
     setPlaying(playing);
+    // the first 'play' after a (re)load is when the track really starts for Last.fm
+    if (playing && track) markStarted(track);
   };
 
   // sleep timer: pause when it fires
@@ -442,6 +637,78 @@ export default function Player() {
     setProgress(v);
   };
 
+  /** Play/pause from a click or key: the gesture is what lets the EQ's AudioContext run. */
+  const onToggle = () => {
+    resumeEq();
+    toggle();
+  };
+
+  // keep the once-registered listeners (keyboard, media session) on the current render
+  useEffect(() => {
+    latest.current = { seek, progress, duration, volume, canSeek: !!track && !isStation };
+  });
+
+  // global keyboard shortcuts — one document listener, reading live state through `latest`
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      const store = usePlayer.getState();
+      const { seek, progress, duration, volume, canSeek } = latest.current;
+      switch (e.key) {
+        case ' ': {
+          // a focused button takes Space itself (that is how keyboard users press it)
+          if (e.target instanceof HTMLElement && e.target.tagName === 'BUTTON') return;
+          e.preventDefault(); // Space would scroll the page
+          if (e.repeat) return;
+          resumeEq();
+          store.toggle();
+          break;
+        }
+        case 'ArrowRight':
+        case 'ArrowLeft': {
+          const forward = e.key === 'ArrowRight';
+          if (e.shiftKey) {
+            e.preventDefault();
+            if (e.repeat) return;
+            if (forward) store.next();
+            else store.prev();
+            break;
+          }
+          if (!canSeek) return;
+          e.preventDefault();
+          const target = forward ? progress + KEY_SEEK_S : progress - KEY_SEEK_S;
+          seek(Math.max(0, duration > 0 ? Math.min(duration, target) : target));
+          break;
+        }
+        case 'm':
+        case 'M': {
+          if (e.repeat) return;
+          e.preventDefault();
+          if (volume > 0) {
+            mutedFromRef.current = volume;
+            store.setVolume(0);
+          } else {
+            store.setVolume(mutedFromRef.current > 0 ? mutedFromRef.current : 1);
+          }
+          break;
+        }
+        case '/': {
+          const box = document.querySelector<HTMLInputElement>('input[type="search"], input[placeholder*="Search"]');
+          if (!box) return;
+          e.preventDefault();
+          box.focus();
+          box.select();
+          break;
+        }
+        default:
+          break;
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   const pct = (n: number, d: number) => (d > 0 ? `${(n / d) * 100}%` : '0%');
 
   const audioProps = {
@@ -451,6 +718,7 @@ export default function Player() {
     onPlay: (e: React.SyntheticEvent<HTMLAudioElement>) => onPlayPause(e, true),
     onPause: (e: React.SyntheticEvent<HTMLAudioElement>) => onPlayPause(e, false),
     onWaiting,
+    // 'stalled' is the fetch going quiet; onWaiting only acts on it once the decoder runs dry
     onStalled: onWaiting,
     onError,
   };
@@ -555,7 +823,7 @@ export default function Player() {
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                toggle();
+                onToggle();
               }}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-black"
               aria-label={isPlaying ? 'Pause' : 'Play'}
@@ -667,7 +935,7 @@ export default function Player() {
                   <PrevIcon size={28} />
                 </button>
                 <button
-                  onClick={toggle}
+                  onClick={onToggle}
                   className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black active:scale-95"
                   aria-label={isPlaying ? 'Pause' : 'Play'}
                 >
@@ -771,7 +1039,7 @@ export default function Player() {
                 <PrevIcon size={20} />
               </button>
               <button
-                onClick={toggle}
+                onClick={onToggle}
                 className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105 active:scale-95"
                 title={isPlaying ? 'Pause' : 'Play'}
                 aria-label={isPlaying ? 'Pause' : 'Play'}
