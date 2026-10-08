@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { spotifyStatus, importTaste, disconnect, hasSpotifyClient } from '@/lib/spotify';
+import { spotifyStatus, importTaste, disconnect, hasSpotifyClient, spotifyErrorResponse } from '@/lib/spotify';
 import { userIdFrom } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     const taste = await importTaste(userIdFrom(req));
     return NextResponse.json({ ok: true, topCount: taste.topArtists.length, savedCount: taste.savedArtists.length });
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 400 });
+    return spotifyErrorResponse(err);
   }
 }
 

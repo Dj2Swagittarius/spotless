@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { NextResponse } from 'next/server';
 import { getDb, getSetting, setSetting, delSetting } from './db';
 import { buildLocalIndex, norm, type WantedTrack } from './playlistMatch';
 
@@ -144,6 +145,48 @@ export function saveSpotifyRedirectOrigin(input: string): SpotifyRedirectConfig 
 
 const tokensKey = (u: number) => `spotify_tokens:${u}`;
 const tasteKey = (u: number) => `spotify_taste:${u}`;
+const NOT_CONNECTED = 'Spotify not connected';
+
+/** A non-2xx answer from Spotify's token or Web API. 401 means the stored grant is unusable. */
+export class SpotifyApiError extends Error {
+  readonly status: number;
+  /** Seconds to wait, from Spotify's Retry-After header on 429. */
+  readonly retryAfter?: number;
+
+  constructor(message: string, status: number, retryAfter?: number) {
+    super(message);
+    this.name = 'SpotifyApiError';
+    this.status = status;
+    this.retryAfter = retryAfter;
+  }
+}
+
+/** Translate a failure from this module into the JSON error a route should return. */
+export function spotifyErrorResponse(err: unknown): NextResponse {
+  if (err instanceof SpotifyApiError) {
+    if (err.status === 401) return NextResponse.json({ error: 'Spotify reconnect required' }, { status: 401 });
+    if (err.status === 429) {
+      const retryAfter = err.retryAfter ?? 30;
+      return NextResponse.json(
+        { error: `Spotify rate limit reached; retry in ${retryAfter}s`, retryAfter },
+        { status: 429, headers: { 'Retry-After': String(retryAfter) } }
+      );
+    }
+    console.error('spotify request failed:', err.message);
+    return NextResponse.json({ error: `Spotify request failed (HTTP ${err.status})` }, { status: 502 });
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  if (message === NOT_CONNECTED) return NextResponse.json({ error: message }, { status: 400 });
+  console.error('spotify request failed:', err);
+  return NextResponse.json({ error: 'Spotify is unreachable right now; try again later' }, { status: 502 });
+}
+
+function retryAfterFrom(res: Response): number | undefined {
+  const raw = res.headers.get('retry-after');
+  if (raw === null) return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : undefined;
+}
 
 interface Tokens {
   access_token: string;
@@ -234,8 +277,21 @@ async function tokenRequest(userId: number, body: Record<string, string>): Promi
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: CLIENT_ID, ...body }),
+    signal: AbortSignal.timeout(10000),
   });
-  if (!res.ok) throw new Error(`Spotify token request failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) {
+    const detail = (await res.text().catch(() => '')).slice(0, 300);
+    // Spotify answers a revoked or already-used refresh token with 400 invalid_grant (or 401).
+    // Those tokens are dead: drop them so spotifyStatus() reports disconnected and the UI
+    // offers Connect again instead of failing every import until the user disconnects by hand.
+    const revoked =
+      body.grant_type === 'refresh_token' && (res.status === 401 || (res.status === 400 && detail.includes('invalid_grant')));
+    if (revoked) {
+      delSetting(tokensKey(userId));
+      throw new SpotifyApiError('Spotify authorization is no longer valid; reconnect required', 401);
+    }
+    throw new SpotifyApiError(`Spotify token request failed (${res.status}): ${detail}`, res.status, retryAfterFrom(res));
+  }
   const data = await res.json();
   const prev = loadTokens(userId);
   const tokens: Tokens = {
@@ -267,33 +323,52 @@ export async function exchangeCode(userId: number, code: string, verifier: strin
   });
 }
 
+// Refresh tokens are single-use: if autosync and a page load both refresh at once, the
+// second request fails with invalid_grant and would wrongly disconnect the profile. One
+// in-flight refresh per user is shared by every concurrent caller instead.
+const refreshGlobal = globalThis as typeof globalThis & { __spotlessSpotifyRefresh?: Map<number, Promise<Tokens>> };
+const refreshing = (refreshGlobal.__spotlessSpotifyRefresh ??= new Map());
+
 async function accessToken(userId: number): Promise<string | null> {
-  let tokens = loadTokens(userId);
+  const tokens = loadTokens(userId);
   if (!tokens) return null;
-  if (Date.now() >= tokens.expires_at) {
-    if (!tokens.refresh_token) return null;
-    tokens = await tokenRequest(userId, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
+  if (Date.now() < tokens.expires_at) return tokens.access_token;
+  if (!tokens.refresh_token) return null;
+
+  let inflight = refreshing.get(userId);
+  if (!inflight) {
+    inflight = tokenRequest(userId, { grant_type: 'refresh_token', refresh_token: tokens.refresh_token }).finally(() =>
+      refreshing.delete(userId)
+    );
+    refreshing.set(userId, inflight);
   }
-  return tokens.access_token;
+  return (await inflight).access_token;
 }
 
-async function api<T>(token: string, path: string): Promise<T | null> {
+async function api<T>(token: string, path: string): Promise<T> {
   const res = await fetch(`https://api.spotify.com/v1${path}`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(15000),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    throw new SpotifyApiError(`Spotify ${path.split('?')[0]} failed (${res.status})`, res.status, retryAfterFrom(res));
+  }
   return (await res.json()) as T;
 }
 
+/**
+ * Re-import the user's taste seeds. Every page must succeed before anything is written:
+ * a partial import would replace a good taste profile with a thin one and throw away the
+ * Discover cache built from it.
+ */
 export async function importTaste(userId: number): Promise<SpotifyTaste> {
   const token = await accessToken(userId);
-  if (!token) throw new Error('Spotify not connected');
+  if (!token) throw new Error(NOT_CONNECTED);
 
   const top = new Set<string>();
   for (const range of ['medium_term', 'long_term']) {
     const page = await api<{ items: { name: string }[] }>(token, `/me/top/artists?limit=50&time_range=${range}`);
-    for (const a of page?.items ?? []) top.add(a.name);
+    for (const a of page.items ?? []) top.add(a.name);
   }
 
   const saved = new Set<string>();
@@ -302,8 +377,8 @@ export async function importTaste(userId: number): Promise<SpotifyTaste> {
       token,
       `/me/tracks?limit=50&offset=${offset}`
     );
-    for (const item of page?.items ?? []) for (const a of item.track.artists) saved.add(a.name);
-    if (!page?.next) break;
+    for (const item of page.items ?? []) for (const a of item.track?.artists ?? []) saved.add(a.name);
+    if (!page.next) break;
   }
 
   const taste: SpotifyTaste = {
@@ -350,18 +425,18 @@ export interface SpotifyPlaylistInfo {
 
 export async function listPlaylists(userId: number): Promise<SpotifyPlaylistInfo[]> {
   const token = await accessToken(userId);
-  if (!token) throw new Error('Spotify not connected');
+  if (!token) throw new Error(NOT_CONNECTED);
   const out: SpotifyPlaylistInfo[] = [];
   for (let offset = 0; offset < 250; offset += 50) {
     const page = await api<{ items: ({ id: string; name: string; tracks?: { total?: number } | null } | null)[]; next: string | null }>(
       token,
       `/me/playlists?limit=50&offset=${offset}`
     );
-    for (const p of page?.items ?? []) {
+    for (const p of page.items ?? []) {
       if (!p?.id) continue; // Spotify returns null entries for deleted/inaccessible playlists
       out.push({ id: p.id, name: p.name ?? 'Untitled', trackCount: p.tracks?.total ?? 0 });
     }
-    if (!page?.next) break;
+    if (!page.next) break;
   }
   return out;
 }
@@ -375,14 +450,14 @@ interface SpotifyPlaylistTrack {
 
 async function playlistTracks(userId: number, playlistId: string): Promise<SpotifyPlaylistTrack[]> {
   const token = await accessToken(userId);
-  if (!token) throw new Error('Spotify not connected');
+  if (!token) throw new Error(NOT_CONNECTED);
   const out: SpotifyPlaylistTrack[] = [];
   for (let offset = 0; offset < 1000; offset += 100) {
     const page = await api<{
       items: { track: { name: string; duration_ms: number; artists: { name: string }[]; album: { name: string } } | null }[];
       next: string | null;
-    }>(token, `/playlists/${playlistId}/tracks?limit=100&offset=${offset}&fields=next,items(track(name,duration_ms,artists(name),album(name)))`);
-    for (const item of page?.items ?? []) {
+    }>(token, `/playlists/${encodeURIComponent(playlistId)}/tracks?limit=100&offset=${offset}&fields=next,items(track(name,duration_ms,artists(name),album(name)))`);
+    for (const item of page.items ?? []) {
       const t = item?.track;
       if (!t?.name) continue; // deleted/local-only entries
       out.push({
@@ -392,7 +467,7 @@ async function playlistTracks(userId: number, playlistId: string): Promise<Spoti
         durationSec: Math.round((t.duration_ms ?? 0) / 1000),
       });
     }
-    if (!page?.next) break;
+    if (!page.next) break;
   }
   return out;
 }

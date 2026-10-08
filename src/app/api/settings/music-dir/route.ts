@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getMusicDir, setMusicDir } from '@/lib/scanner';
-import { requireAdmin } from '@/lib/user';
+import { isAdmin, requireAdmin } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return NextResponse.json({ dir: getMusicDir() });
+// The absolute server path is only shown to the admin profile, which is the only one that can change it.
+export async function GET(req: NextRequest) {
+  return NextResponse.json({ dir: isAdmin(req) ? getMusicDir() : null });
 }
 
 export async function PUT(req: NextRequest) {

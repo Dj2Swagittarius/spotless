@@ -10,19 +10,30 @@ export interface TrendTrack {
 }
 
 const TTL_MS = 6 * 60 * 60 * 1000;
+// A failed upstream fetch is remembered briefly so every page view doesn't re-hit a dead chart
+// endpoint (and wait out its timeout), while still recovering within minutes.
+const NEGATIVE_TTL_MS = 10 * 60 * 1000;
 
-function cached<T>(key: string): T | null {
+interface CacheEntry<T> {
+  at: number;
+  data: T;
+  failed?: boolean;
+}
+
+function cached<T>(key: string): { data: T; failed: boolean } | null {
   const raw = getSetting(key);
   if (!raw) return null;
   try {
-    const c = JSON.parse(raw);
-    if (Date.now() - c.at < TTL_MS) return c.data as T;
+    const c = JSON.parse(raw) as CacheEntry<T>;
+    const ttl = c.failed ? NEGATIVE_TTL_MS : TTL_MS;
+    if (Date.now() - c.at < ttl) return { data: c.data, failed: Boolean(c.failed) };
   } catch {
     // rebuild
   }
   return null;
 }
-const store = (key: string, data: unknown) => setSetting(key, JSON.stringify({ at: Date.now(), data }));
+const store = (key: string, data: unknown, failed = false) =>
+  setSetting(key, JSON.stringify({ at: Date.now(), data, ...(failed ? { failed: true } : {}) }));
 
 async function getJson<T>(url: string): Promise<T | null> {
   try {
@@ -62,7 +73,7 @@ export async function countryChart(code: string): Promise<TrendTrack[]> {
   const cc = COUNTRIES.some((c) => c.code === code) ? code : 'ww';
   const key = `trending:${cc}`;
   const hit = cached<TrendTrack[]>(key);
-  if (hit) return hit;
+  if (hit) return hit.data;
 
   let out: TrendTrack[] = [];
   if (cc === 'ww') {
@@ -89,7 +100,7 @@ export async function countryChart(code: string): Promise<TrendTrack[]> {
       genres: (r.genres ?? []).map((g) => g.name).filter((n) => n !== 'Music'),
     }));
   }
-  if (out.length) store(key, out);
+  store(key, out, out.length === 0);
   return out;
 }
 
@@ -98,31 +109,33 @@ interface DeezerGenre {
   name: string;
 }
 
-async function deezerGenres(): Promise<DeezerGenre[]> {
+async function deezerGenres(): Promise<{ list: DeezerGenre[]; failed: boolean }> {
   const hit = cached<DeezerGenre[]>('trending:genrelist');
-  if (hit) return hit;
+  if (hit) return { list: hit.data, failed: hit.failed };
   const d = await getJson<{ data: DeezerGenre[] }>('https://api.deezer.com/genre');
   const list = (d?.data ?? []).filter((g) => g.name !== 'All');
-  if (list.length) store('trending:genrelist', list);
-  return list;
+  const failed = list.length === 0;
+  store('trending:genrelist', list, failed);
+  return { list, failed };
 }
 
-async function genreChart(g: DeezerGenre): Promise<TrendTrack[]> {
+async function genreChart(g: DeezerGenre): Promise<{ tracks: TrendTrack[]; failed: boolean }> {
   const key = `trending:genre:${g.id}`;
   const hit = cached<TrendTrack[]>(key);
-  if (hit) return hit;
+  if (hit) return { tracks: hit.data, failed: hit.failed };
   const d = await getJson<{ tracks: { data: { title: string; artist: { name: string }; album: { title: string; cover_medium: string | null } }[] } }>(
     `https://api.deezer.com/editorial/${g.id}/charts`
   );
-  const out = (d?.tracks?.data ?? []).slice(0, 20).map((t, i) => ({
+  const tracks = (d?.tracks?.data ?? []).slice(0, 20).map((t, i) => ({
     rank: i + 1,
     title: t.title,
     artist: t.artist.name,
     album: t.album?.title ?? null,
     art: t.album?.cover_medium ?? null,
   }));
-  if (out.length) store(key, out);
-  return out;
+  const failed = tracks.length === 0;
+  store(key, tracks, failed);
+  return { tracks, failed };
 }
 
 /** User's top genre names from their listening (fallback: whole library). */
@@ -149,9 +162,16 @@ export interface GenreRow {
   tracks: TrendTrack[];
 }
 
+export interface GenreTrending {
+  forYou: TrendTrack[];
+  rows: GenreRow[];
+  /** Present when some charts could not be fetched, so the page can say the view is incomplete. */
+  error?: string;
+}
+
 /** Genre rows: listener-pertinent genres first, then popular defaults. First row = blended "for you". */
-export async function genreTrending(userId: number): Promise<{ forYou: TrendTrack[]; rows: GenreRow[] }> {
-  const all = await deezerGenres();
+export async function genreTrending(userId: number): Promise<GenreTrending> {
+  const { list: all, failed: genreListFailed } = await deezerGenres();
   const mine = userGenres(userId);
 
   const match = (name: string) => {
@@ -178,11 +198,18 @@ export async function genreTrending(userId: number): Promise<{ forYou: TrendTrac
     }
   }
 
+  // Charts are independent, so fetch them together; one slow or dead genre must not block the rest.
+  const settled = await Promise.allSettled(picked.map(({ g }) => genreChart(g)));
   const rows: GenreRow[] = [];
-  for (const { g, forYou } of picked) {
-    const tracks = await genreChart(g);
-    if (tracks.length) rows.push({ name: g.name, forYou, tracks });
-  }
+  let chartFailed = genreListFailed;
+  settled.forEach((outcome, i) => {
+    if (outcome.status === 'rejected' || outcome.value.failed) {
+      chartFailed = true;
+      return;
+    }
+    const { g, forYou } = picked[i];
+    if (outcome.value.tracks.length) rows.push({ name: g.name, forYou, tracks: outcome.value.tracks });
+  });
 
   // "for you" blend: interleave the user's genre rows
   const yours = rows.filter((r) => r.forYou);
@@ -193,5 +220,7 @@ export async function genreTrending(userId: number): Promise<{ forYou: TrendTrac
       if (t && !forYou.some((x) => x.title === t.title && x.artist === t.artist)) forYou.push(t);
     }
   }
-  return { forYou: forYou.map((t, i) => ({ ...t, rank: i + 1 })), rows };
+  const result: GenreTrending = { forYou: forYou.map((t, i) => ({ ...t, rank: i + 1 })), rows };
+  if (chartFailed) result.error = 'Some genre charts are unavailable right now; showing what could be loaded.';
+  return result;
 }

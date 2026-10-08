@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLidarrConfig, saveLidarrConfig, clearLidarrConfig, testLidarr } from '@/lib/lidarr';
-import { requireAdmin } from '@/lib/user';
+import { isAdmin, requireAdmin } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+// Every profile may ask whether Lidarr is set up (Discover/Search/Trending show download
+// buttons based on it); only the admin, who manages the connection, gets the URL itself.
+export async function GET(req: NextRequest) {
   const cfg = getLidarrConfig();
-  return NextResponse.json({ configured: cfg !== null, url: cfg?.url ?? null });
+  return NextResponse.json({ configured: cfg !== null, url: isAdmin(req) ? (cfg?.url ?? null) : null });
 }
 
 export async function PUT(req: NextRequest) {
