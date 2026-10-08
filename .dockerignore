@@ -1,8 +1,12 @@
-node_modules
-.next
-data
-.git
-Dockerfile
-docker-compose.yml
-README.md
-docker-compose.test.yml
+# Allow-list: only what the build needs reaches the daemon, so local data, .git, docs and
+# screenshots never bloat the context or leak into the image.
+*
+!package.json
+!package-lock.json
+!src
+!public
+!next.config.mjs
+!tsconfig.json
+!tailwind.config.ts
+!postcss.config.mjs
+!docker-entrypoint.sh

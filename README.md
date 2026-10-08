@@ -1,16 +1,14 @@
 # Spotless
 
-Fork of [spotless](https://github.com/Dj2Swagittarius/spotless).
-
-I created this fork because i want to create an app which I wanted to use  for an more seamless experience.
-
-This fork aims for a more seamless self-hosted Spotify-style app.
-
-Disclaimer: I'm not a developer. Just a passionate guy who developed an APP with the help of AI.
-
 Self-hosted, single-container music streamer with a Spotify-style interface.
 
-Point it at a folder of music and it gives you a dark-themed player with profiles, discovery, a 10-band EQ, internet radio, and optional Lidarr, Spotify and Last.fm integrations.
+Point it at a folder of music and it gives you a dark-themed player with profiles, discovery, a 10-band EQ,
+internet radio, an optional AI DJ, and Lidarr, Spotify and Last.fm integrations. Everything runs from one Docker
+image with an SQLite database; your audio files stay where they are and are only ever read.
+
+Acknowledgements: Spotless builds on the original Spotless project by lateshift.tech (see [LICENSE](LICENSE));
+thanks to its authors and contributors for the foundation this version grows from.
+
 
 ![Home](docs/home.png)
 
@@ -243,6 +241,24 @@ docker compose up -d --build
 
    ![Setup wizard](docs/setup.png)
 
+## Run the prebuilt image
+
+CI publishes a multi-arch image (amd64 + arm64) to `ghcr.io/dj2swagittarius/spotless:latest`; tagged releases
+also get `:<major>.<minor>` and `:<version>` tags. The supplied `docker-compose.yml` already references it, so
+instead of building locally you can:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+On first start the container runs as root just long enough to make the bind-mounted `./data` folder writable
+(Docker creates it root-owned), then drops to an unprivileged user. Set `PUID` / `PGID` in the `environment:`
+block to the uid/gid that should own `./data` (the defaults are `1000` / `1000`; `id -u` and `id -g` print yours).
+Only `/data` is ever chowned; your music mount is never touched.
+
+The image includes a `HEALTHCHECK` against `GET /api/health`, which returns `200 { "ok": true }` while the
+database is reachable and `503` otherwise, so `docker ps` and orchestrators can see when Spotless is actually up.
+
 ## Configuration
 
 | Env var | Default | Purpose |
@@ -262,6 +278,11 @@ docker compose up -d --build
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ELEVENLABS_API_KEY` | *(none)* | AI DJ: optional keys for hosted providers (keys saved in Settings take priority) |
 | `AUTH_MIN_PASSWORD_LENGTH` | `4` | Minimum web password length. `4` allows a PIN on a home network; raise it (e.g. `12`) if Spotless is reachable from the internet |
 | `TRUST_PROXY` | *(off)* | Number of reverse-proxy hops in front of Spotless (usually `1`). Lets login throttling read the client IP from `X-Forwarded-For`; leave unset when clients connect directly, because the header can be forged |
+| `DJ_PROVIDER` | `ollama` | AI DJ: default LLM provider id (Settings → AI DJ overrides it) |
+| `BACKUP_DIR` | `DATA_DIR/backups` | Where the daily database backups are written |
+| `LOG_LEVEL` | `info` | Server log verbosity: `debug`, `info`, `warn` or `error` |
+| `HOSTNAME` | `0.0.0.0` | Bind address of the production server |
+| `PUID` / `PGID` | `1000` / `1000` | Docker only: uid/gid that owns `/data` and runs the app (see *Run the prebuilt image*) |
 
 Automatic library refresh is configured inside **Settings → Music library** and is stored
 in `DATA_DIR/library.db`; no environment variable is required. The default is **Off**.
@@ -533,17 +554,43 @@ When Spotless runs in Docker, `localhost` is the container itself: use `http://h
 
 The DJ only plays songs it can match to your library. Picks it can't match are shown as suggestions only when Deezer confirms the song exists. Each profile's chat history is kept in that browser only.
 
-## Local development
+## Backup and restore
+
+Spotless copies the SQLite database to `DATA_DIR/backups/library-YYYY-MM-DD.db` (or `BACKUP_DIR` if set) on
+startup and once every 24 hours, keeping the last 7. Each copy is written to a temporary file, integrity-checked
+with `PRAGMA quick_check`, and only then renamed into place, so a half-written backup never replaces a good one.
+With the default compose file that is `./data/backups` on the host.
+
+To restore:
+
+1. Stop the container: `docker compose down`.
+2. Copy the backup over the live database: `cp data/backups/library-YYYY-MM-DD.db data/library.db`.
+3. Delete the stale journal files if they exist: `rm -f data/library.db-wal data/library.db-shm`.
+4. Start again: `docker compose up -d`.
+
+Extracted album art lives in `DATA_DIR/art` and is rebuilt by the next library scan if it is missing.
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full setup, the throwaway Docker test stack on port 3300, and
+what a pull request needs. The short version:
 
 ```bash
-
-npm install
-
+npm ci
 # put some audio files in ./music (or set MUSIC_DIR)
-
 npm run dev
-
 ```
+
+| Script | Purpose |
+| --- | --- |
+| `npm run typecheck` | TypeScript, no emit |
+| `npm run lint` | ESLint (`eslint-config-next`) |
+| `npm test` | Vitest unit tests |
+| `npm run format:check` | Prettier |
+| `npm run build` | Production build |
+
+CI runs all of these on every pull request. `GET /api/health` is handy while developing: it answers `200` once
+the server and database are up.
 
 ## Security model — read this
 
@@ -598,6 +645,11 @@ A 4-digit PIN is accepted by default for convenience on a home network. Throttli
 **Upgrading from a passwordless version:** the first person to open the profile picker after the upgrade can claim the admin profile by setting its password. If your server was reachable by people you don't trust, do the upgrade and claim the admin password yourself immediately.
 
 For Internet-facing access, authentication + HTTPS is the minimum recommended deployment. A VPN/private-network layer is still a useful additional boundary for a self-hosted personal server.
+
+## About
+
+Spotless is a personal project, built by a music fan rather than a professional developer, with a lot of help
+from AI tooling. It is used daily on a home server, but expect rough edges; issues and pull requests are welcome.
 
 ## License
 
