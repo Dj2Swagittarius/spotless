@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { artDir } from '@/lib/db';
 import { imageContentType } from '@/lib/art';
+import { fileValidators, isNotModified } from '@/lib/streaming';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,18 +34,27 @@ function placeholder(id: number): Response {
   });
 }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ albumId: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ albumId: string }> }) {
   const { albumId } = await params;
   const id = Number(albumId);
+  if (!Number.isInteger(id)) return placeholder(0);
   const file = path.join(artDir(), `${id}.img`);
-  if (!Number.isInteger(id) || !fs.existsSync(file)) return placeholder(Number.isInteger(id) ? id : 0);
-  const buf = fs.readFileSync(file);
+  const st = await fs.promises.stat(file).catch(() => null);
+  if (!st?.isFile()) return placeholder(id);
+
+  const v = fileValidators(st);
+  const headers = {
+    'Cache-Control': 'public, max-age=86400',
+    ETag: v.etag,
+    'Last-Modified': v.lastModified,
+  };
+  if (isNotModified(req, v)) return new Response(null, { status: 304, headers });
+
+  const buf = await fs.promises.readFile(file);
+  // stored bytes are only ever served under a sniffed raster type, never text/html or svg
   const contentType = imageContentType(buf);
   if (!contentType) return placeholder(id);
   return new Response(new Uint8Array(buf), {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=86400',
-    },
+    headers: { ...headers, 'Content-Type': contentType, 'X-Content-Type-Options': 'nosniff' },
   });
 }

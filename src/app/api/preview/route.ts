@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
     const url = data?.data?.[0]?.preview || null;
     return NextResponse.json({ previewUrl: url });
   } catch {
-    return NextResponse.json({ previewUrl: null });
+    // timeout (AbortSignal.timeout above) or network failure: an upstream problem, not "no preview"
+    return NextResponse.json({ error: 'preview lookup failed' }, { status: 502 });
   }
 }
