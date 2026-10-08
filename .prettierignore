@@ -7,3 +7,5 @@ dj-test
 package-lock.json
 next-env.d.ts
 *.tsbuildinfo
+.claude/
+test-env/

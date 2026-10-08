@@ -4,7 +4,7 @@ import nextTs from 'eslint-config-next/typescript';
 
 export default defineConfig([
   // Build output, dependencies, runtime data and non-source folders are never linted.
-  globalIgnores(['.next/**', 'node_modules/**', 'data/**', 'docs/**', 'public/**', 'dj-test/**', 'next-env.d.ts']),
+  globalIgnores(['.next/**', '.claude/**', 'test-env/**', 'node_modules/**', 'data/**', 'docs/**', 'public/**', 'dj-test/**', 'next-env.d.ts']),
   ...nextVitals,
   ...nextTs,
   {
