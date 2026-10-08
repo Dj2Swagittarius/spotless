@@ -26,6 +26,8 @@ interface Data {
   chart: TrendTrack[];
   forYou: TrendTrack[];
   rows: GenreRow[];
+  /** Set by the API when some genre charts could not be fetched; the rows below are incomplete. */
+  error?: string;
 }
 
 type DlStatus = 'busy' | 'sent' | 'requested' | 'fail' | undefined;
@@ -173,6 +175,12 @@ export default function TrendingPage() {
         <RowListSkeleton count={10} />
       ) : (
         <>
+          {data.error && (
+            <div role="status" className="rounded bg-elevated px-3 py-2 text-sm text-subdued">
+              Some charts could not be loaded; this view may be incomplete.
+            </div>
+          )}
+
           {data.forYou.length > 0 && (
             <section>
               <h2 className="mb-1 text-xl font-bold">Trending for you</h2>

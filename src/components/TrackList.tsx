@@ -124,8 +124,12 @@ export default function TrackList({
     const p = pendingFocus.current;
     if (!p) return;
     pendingFocus.current = null;
-    const el = listRef.current?.querySelector<HTMLButtonElement>(`[data-row-key="${p.key}"] button[data-move="${p.dir}"]`);
-    el?.focus();
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-row-key="${p.key}"]`);
+    const el = row?.querySelector<HTMLButtonElement>(`button[data-move="${p.dir}"]`);
+    // the pressed button is disabled once the row reaches an end of the list, and focus() on a
+    // disabled button is a no-op; fall back to the other arrow so focus stays in the list
+    const target = el && !el.disabled ? el : row?.querySelector<HTMLButtonElement>('button[data-move]:not(:disabled)');
+    target?.focus();
   });
 
   // placeholders can't play: the queue is built from real tracks only

@@ -65,7 +65,10 @@ export default function DiscoverPage() {
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const [lidarrConfigured, setLidarrConfigured] = useState(false);
   const [releases, setReleases] = useState<NewRelease[] | null>(null);
+  // the API sets degraded when some Deezer lookups failed, so an empty or short list is not the whole answer
+  const [releasesDegraded, setReleasesDegraded] = useState(false);
   const [gaps, setGaps] = useState<MissingAlbum[] | null>(null);
+  const [gapsDegraded, setGapsDegraded] = useState(false);
   const [gapsLoading, setGapsLoading] = useState(false);
   const [dlQueue, setDlQueue] = useState<{ title: string; artist: string | null; status: string; state: string | null; pct: number }[]>([]);
   // per-artist download state: 'busy' | 'added' | 'searching' | 'requested' | error text
@@ -127,8 +130,11 @@ export default function DiscoverPage() {
       .then((d) => setIsAdmin(!!d.current?.isAdmin))
       .catch(() => {});
     loadRequests(ac.signal);
-    getJson<{ releases?: NewRelease[] }>('/api/releases', init)
-      .then((d) => setReleases(d.releases ?? []))
+    getJson<{ releases?: NewRelease[]; degraded?: boolean }>('/api/releases', init)
+      .then((d) => {
+        setReleases(d.releases ?? []);
+        setReleasesDegraded(Boolean(d.degraded));
+      })
       .catch((err) => {
         if (!isAbortError(err)) setReleases([]);
       });
@@ -313,6 +319,9 @@ export default function DiscoverPage() {
       {releases && releases.length > 0 && (
         <section>
           <h2 className="mb-3 text-xl font-bold">New releases from your artists</h2>
+          {releasesDegraded && (
+            <p className="mb-3 text-sm text-subdued">Some lookups failed; this list may be incomplete.</p>
+          )}
           <div className="flex gap-3 overflow-x-auto pb-2">
             {releases.map((r) => (
               <div key={`${r.artist}-${r.title}`} className="w-40 shrink-0 rounded-lg bg-elevated p-3">
@@ -394,8 +403,13 @@ export default function DiscoverPage() {
           <button
             onClick={async () => {
               setGapsLoading(true);
-              const d = await fetch('/api/collection').then((r) => r.json()).catch(() => ({ missing: [] }));
+              // a failed request counts as degraded too: "collection complete" must never be shown for it
+              const d = await getJson<{ missing?: MissingAlbum[]; degraded?: boolean }>('/api/collection').catch(() => ({
+                missing: [],
+                degraded: true,
+              }));
               setGaps(d.missing ?? []);
+              setGapsDegraded(Boolean(d.degraded));
               setGapsLoading(false);
             }}
             disabled={gapsLoading}
@@ -404,7 +418,12 @@ export default function DiscoverPage() {
             {gapsLoading ? 'Checking…' : gaps ? 'Refresh' : 'Show gaps'}
           </button>
         </div>
-        {gaps && gaps.length === 0 && <div className="mt-3 text-sm text-subdued">No gaps found — collection complete for your top artists.</div>}
+        {gaps && gapsDegraded && (
+          <div className="mt-3 text-sm text-subdued">Some lookups failed; this list may be incomplete.</div>
+        )}
+        {gaps && gaps.length === 0 && !gapsDegraded && (
+          <div className="mt-3 text-sm text-subdued">No gaps found — collection complete for your top artists.</div>
+        )}
         {gaps && gaps.length > 0 && (
           <div className="mt-4 grid max-h-96 grid-cols-1 gap-1 overflow-y-auto md:grid-cols-2">
             {gaps.map((g) => {

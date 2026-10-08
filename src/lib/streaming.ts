@@ -17,7 +17,8 @@ const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const LOSSLESS = new Set(['.flac', '.wav', '.aiff', '.aif']);
 
 // Each ffmpeg saturates a core; past this many at once every stream starts stuttering,
-// so extra listeners get the raw file instead of a transcode that would starve the rest.
+// so extra listeners get the raw file instead of a transcode that would starve the rest
+// (or a 503 when they asked to start mid-track, where a raw file would be the wrong audio).
 const TRANSCODE_MAX_ACTIVE = (() => {
   const n = Number(process.env.TRANSCODE_MAX_ACTIVE);
   return Number.isInteger(n) && n > 0 ? n : Math.max(1, os.cpus().length);
@@ -202,10 +203,18 @@ export async function serveTrack(req: Request, filePath: string, opts: ServeOpti
   const wantsRaw = opts.download || format === 'raw' || (maxBitRate === 0 && sameContainer);
   if (wantsRaw) return raw();
 
+  // Infinity/NaN would reach ffmpeg as "-ss Infinity"; past the end there is nothing to seek to.
+  // Resolved before the raw-file shortcuts below: a client that asked for a transcode starting
+  // at `offset` treats whatever comes back as starting there (the web player shifts its clock
+  // by it), so a raw file from byte 0 would play from the top while the progress bar reads
+  // offset + currentTime. Those shortcuts are therefore only safe when no offset was asked for.
+  let offset = positiveFinite(opts.offset);
+  if (durationSec > 0) offset = Math.min(offset, durationSec);
+
   // A bitrate cap is a request to not exceed it, not to re-encode: when the source is already
   // a lossy file in the wanted container and fits the cap (10% slack for container overhead
   // and VBR estimation error), re-encoding would only burn CPU and lose quality.
-  if (maxBitRate > 0 && sameContainer && !LOSSLESS.has(suffix) && durationSec > 0) {
+  if (offset === 0 && maxBitRate > 0 && sameContainer && !LOSSLESS.has(suffix) && durationSec > 0) {
     const sourceKbps = (st.size * 8) / durationSec / 1000;
     if (sourceKbps <= maxBitRate * 1.1) return raw();
   }
@@ -216,7 +225,13 @@ export async function serveTrack(req: Request, filePath: string, opts: ServeOpti
       lastCapLogAt = now;
       console.warn(`[stream] ${activeTranscodes} transcodes active (cap ${TRANSCODE_MAX_ACTIVE}); serving raw files`);
     }
-    return raw();
+    if (offset === 0) return raw();
+    // A mid-track resume can't be served raw (see above) and must not add to the overload;
+    // tell the client to try again shortly, when a slot has likely freed up.
+    return new Response('transcoder busy', {
+      status: 503,
+      headers: { 'Retry-After': '5', 'Cache-Control': 'no-store' },
+    });
   }
 
   // transcode via ffmpeg; falls back to the raw file if ffmpeg isn't available
@@ -224,9 +239,6 @@ export async function serveTrack(req: Request, filePath: string, opts: ServeOpti
   const br = Math.min(Math.max(maxBitRate || 192, 32), 320);
   // -ss before -i seeks by keyframe/packet before decoding: near-instant, and the pipe
   // then starts at the requested second so a quality switch resumes instead of restarting
-  // Infinity/NaN would reach ffmpeg as "-ss Infinity"; past the end there is nothing to seek to
-  let offset = positiveFinite(opts.offset);
-  if (durationSec > 0) offset = Math.min(offset, durationSec);
   const args = ['-v', 'error'];
   if (offset > 0) args.push('-ss', offset.toFixed(3));
   args.push('-i', filePath, '-map', '0:a:0', '-vn');

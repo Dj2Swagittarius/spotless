@@ -8,6 +8,12 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    # Values from a host-side .env (see .env.example) are passed into the container, so the same
+    # file configures `next dev` and Docker. Optional (needs Compose 2.24+ for `required: false`);
+    # keys set in `environment:` below win over the same keys in .env.
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Dedicated write mount used only for optional generated .lrc sidecars.
       - MUSIC_WRITE_DIR=/music-write
@@ -24,6 +30,9 @@ services:
     #   - STT_URL=http://host.docker.internal:8000/v1
     #   # optional deployment default for reverse-proxy OAuth; Settings → Spotify can override it
     #   - SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
+    #   # optional — allow radio stations on LAN / loopback IP addresses (e.g. a local Icecast box);
+    #   # off by default so the station proxy cannot reach other services on your network
+    #   - ALLOW_PRIVATE_STREAM_URLS=1
     # lets the AI DJ reach Ollama / LM Studio / voice servers running on the host
     extra_hosts:
       - "host.docker.internal:host-gateway"

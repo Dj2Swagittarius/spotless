@@ -269,9 +269,12 @@ export default function Player() {
         other.pause();
         other.removeAttribute('src');
       }
+      // a restored session lands here paused: point the element at the track but don't
+      // fetch anything yet (a transcode rung would spin up ffmpeg on the server just to
+      // answer a metadata request nobody asked for) — the first play() loads it
+      a.preload = isPlaying ? 'auto' : 'none';
       setSrc(a, track, currentRung());
       a.volume = Math.min(1, volume * gainMult(track.gain));
-      // a restored session lands here paused: load the track, don't start it
       if (isPlaying) a.play().catch(() => {});
       setProgress(0);
     }
@@ -292,6 +295,10 @@ export default function Player() {
   useEffect(() => {
     const other = els()[1 - active];
     if (!other || fadingRef.current) return;
+    // a restored session sits paused at the saved track until the user presses play;
+    // until then there is nothing to be gapless into, so don't download the next song
+    // in full on every page load
+    if (!isPlaying && progress === 0) return;
     if (deferPreload() && duration > 0 && duration - progress > Math.max(PRELOAD_LEAD_S, crossfadeSec())) return;
     if (nextTrack && !nextTrack.streamUrl && !hasSrc(other, nextTrack)) {
       other.preload = 'auto';
@@ -299,7 +306,7 @@ export default function Player() {
       other.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextTrack?.id, active, progress, duration]);
+  }, [nextTrack?.id, active, progress, duration, isPlaying]);
 
   // radio: when the last queued track starts, top the queue up in advance
   useEffect(() => {

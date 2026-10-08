@@ -6,7 +6,14 @@ import { imageContentType } from '@/lib/art';
 import { nextPosition } from '@/lib/playlistMatch';
 import { scrobbleTrack, updateNowPlaying } from '@/lib/lastfm';
 import { scanLibrary, scanStatus } from '@/lib/scanner';
-import { listStations, createStation, updateStation, deleteStation, validStreamUrl } from '@/lib/stations';
+import {
+  listStations,
+  createStation,
+  updateStation,
+  deleteStation,
+  streamUrlError,
+  assertPublicStreamUrl,
+} from '@/lib/stations';
 import { serveTrack } from '@/lib/streaming';
 import { ADMIN_USER_ID } from '@/lib/user';
 import { resolveLyrics } from '@/lib/lyrics';
@@ -127,7 +134,9 @@ function like(term: string): string {
 async function streamTrack(ctx: Ctx, download = false): Promise<Response> {
   const sid = parseSid(ctx.q.get('id'));
   if (!sid || sid.kind !== 'track') return fail(ctx, 70, 'song not found');
-  const row = db().prepare('SELECT path FROM tracks WHERE id = ?').get(sid.id) as { path: string } | undefined;
+  const row = db().prepare('SELECT path, duration FROM tracks WHERE id = ?').get(sid.id) as
+    | { path: string; duration: number }
+    | undefined;
   if (!row || !fs.existsSync(row.path)) return fail(ctx, 70, 'song not found');
   // OpenSubsonic transcodeOffset: seconds into the track to start a transcoded stream at
   const timeOffset = Number(ctx.q.get('timeOffset'));
@@ -136,6 +145,9 @@ async function streamTrack(ctx: Ctx, download = false): Promise<Response> {
     maxBitRate: Number(ctx.q.get('maxBitRate')) || 0,
     download,
     offset: ctx.q.has('timeOffset') && Number.isFinite(timeOffset) && timeOffset >= 0 ? timeOffset : undefined,
+    // Same as the web route: lets a source that already fits maxBitRate skip the transcode
+    // and bounds timeOffset by the track length.
+    durationSec: Number(row.duration) || 0,
   });
 }
 
@@ -680,21 +692,37 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
       },
     }),
 
-  createInternetRadioStation: (ctx) => {
+  createInternetRadioStation: async (ctx) => {
     if (ctx.user.id !== ADMIN_USER_ID) return fail(ctx, 50, 'admin only');
     const name = ctx.q.get('name') ?? '';
     const streamUrl = ctx.q.get('streamUrl') ?? '';
-    if (!name || !validStreamUrl(streamUrl)) return fail(ctx, 10, 'name and streamUrl required');
+    if (!name || !streamUrl) return fail(ctx, 10, 'name and streamUrl required');
+    // code 0 (generic) rather than 10: the parameter is present, it is the address that is refused
+    const urlError = streamUrlError(streamUrl);
+    if (urlError) return fail(ctx, 0, urlError);
+    // literals passed; now make sure the hostname does not resolve back into the LAN either
+    try {
+      await assertPublicStreamUrl(streamUrl);
+    } catch (err) {
+      return fail(ctx, 0, (err as Error).message);
+    }
     createStation(name, streamUrl, ctx.q.get('homepageUrl'));
     return ok(ctx);
   },
 
-  updateInternetRadioStation: (ctx) => {
+  updateInternetRadioStation: async (ctx) => {
     if (ctx.user.id !== ADMIN_USER_ID) return fail(ctx, 50, 'admin only');
     const id = Number((ctx.q.get('id') ?? '').replace(/^ir-/, ''));
     const name = ctx.q.get('name') ?? '';
     const streamUrl = ctx.q.get('streamUrl') ?? '';
-    if (!id || !name || !validStreamUrl(streamUrl)) return fail(ctx, 10, 'id, name and streamUrl required');
+    if (!id || !name || !streamUrl) return fail(ctx, 10, 'id, name and streamUrl required');
+    const urlError = streamUrlError(streamUrl);
+    if (urlError) return fail(ctx, 0, urlError);
+    try {
+      await assertPublicStreamUrl(streamUrl);
+    } catch (err) {
+      return fail(ctx, 0, (err as Error).message);
+    }
     if (!updateStation(id, name, streamUrl, ctx.q.get('homepageUrl'))) return fail(ctx, 70, 'station not found');
     return ok(ctx);
   },

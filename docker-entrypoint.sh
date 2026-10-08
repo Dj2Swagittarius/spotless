@@ -30,9 +30,19 @@ if [ "$(id -u node)" != "$PUID" ]; then
 fi
 
 # Only /data is ever chowned. /music is the user's library and must never be touched.
-if [ -d /data ] && [ "$(stat -c '%u:%g' /data)" != "$PUID:$PGID" ]; then
-  echo "entrypoint: fixing ownership of /data for $PUID:$PGID"
-  chown -R "$PUID:$PGID" /data
+if [ -d /data ]; then
+  if [ "$(stat -c '%u:%g' /data)" != "$PUID:$PGID" ]; then
+    echo "entrypoint: fixing ownership of /data for $PUID:$PGID"
+    # Best effort: CIFS without unix extensions, NFS with root_squash and read-only mounts reject
+    # chown even though their mode bits may already let the app write, and `set -e` would otherwise
+    # kill the container here. What matters is writability, which is checked as the app user below.
+    chown -R "$PUID:$PGID" /data 2>/dev/null \
+      || echo "entrypoint: could not change ownership of /data (network/read-only mount?); continuing" >&2
+  fi
+  if ! gosu node test -w /data; then
+    echo "entrypoint: /data is not writable by uid $PUID; fix the mount permissions or set PUID/PGID" >&2
+    exit 1
+  fi
 fi
 
 exec gosu node "$@"

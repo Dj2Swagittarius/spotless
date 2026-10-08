@@ -270,6 +270,8 @@ database is reachable and `503` otherwise, so `docker ps` and orchestrators can 
 | `SPOTIFY_CLIENT_ID` | *(none)* | Optional; enables the Spotify taste/playlist import |
 | `SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
 | `FFMPEG_PATH` | `ffmpeg` | Path to ffmpeg (bundled in the Docker image) |
+| `TRANSCODE_MAX_ACTIVE` | number of CPU cores | Maximum concurrent ffmpeg transcodes; once reached, extra listeners get the raw file instead of a transcode (or `503` when they asked to start mid-track) |
+| `ALLOW_PRIVATE_STREAM_URLS` | *(off)* | Set to `1` to let internet radio stations point at loopback, LAN (RFC 1918) or link-local IP addresses, e.g. an Icecast box on `192.168.x.x`. Off by default so the station proxy cannot be used to read other services on your network; stations addressed by hostname are unaffected |
 | `LIDARR_WEBHOOK_SECRET` | *(none)* | Optional; if set, the Lidarr webhook requires `?token=<secret>` |
 | `AUTH_SECURE_COOKIE` | *(auto)* | Force the web session cookie to `Secure`; use `true` behind HTTPS if proxy detection is unavailable |
 | `OLLAMA_URL` / `LMSTUDIO_URL` | `http://localhost:11434` / `http://localhost:1234/v1` | AI DJ: default local LLM server URLs |
