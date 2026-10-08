@@ -40,7 +40,12 @@ export default function TopBar() {
     setQ(v);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      if (v.trim()) router.push(`/search?q=${encodeURIComponent(v.trim())}`);
+      if (!v.trim()) return;
+      const url = `/search?q=${encodeURIComponent(v.trim())}`;
+      // one history entry for entering search; later keystrokes update it in place so Back leaves search
+      // instead of stepping through every intermediate query
+      if (pathname === '/search') router.replace(url);
+      else router.push(url);
     }, 300);
   };
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requestOrigin } from '@/lib/auth';
 import { beginOAuth, createHandoff, getSpotifyRedirectConfig, hasSpotifyClient, takeHandoff } from '@/lib/spotify';
 import { userIdFrom } from '@/lib/user';
 
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 // this browser may not have a session. It authenticates with a one-time handoff instead.
 export async function GET(req: NextRequest) {
   if (!hasSpotifyClient) {
-    return NextResponse.redirect(new URL('/discover?spotify_error=SPOTIFY_CLIENT_ID+not+set', req.url));
+    return NextResponse.redirect(`${requestOrigin(req)}/discover?spotify_error=SPOTIFY_CLIENT_ID+not+set`);
   }
 
   const config = getSpotifyRedirectConfig();

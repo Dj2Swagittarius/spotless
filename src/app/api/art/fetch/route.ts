@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchMissingArt, artStatus } from '@/lib/art';
-import { requireAdmin } from '@/lib/user';
+import { isAdmin, requireAdmin } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return NextResponse.json(artStatus());
+// The failure text can name server paths; only the admin profile, which runs the fetch, sees it.
+export async function GET(req: NextRequest) {
+  const status = artStatus();
+  if (isAdmin(req) || !status.lastError) return NextResponse.json(status);
+  return NextResponse.json({ ...status, lastError: 'Artwork fetch failed (details are shown to the admin profile)' });
 }
 
 export async function POST(req: NextRequest) {

@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { LoadErrorState } from '@/components/Cards';
 import { StatTilesSkeleton, RowListSkeleton } from '@/components/Skeleton';
+import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
 
 type Period = 'week' | 'month' | 'year' | 'all';
 
@@ -26,13 +28,22 @@ function fmtHours(seconds: number): string {
 export default function StatsPage() {
   const [period, setPeriod] = useState<Period>('month');
   const [stats, setStats] = useState<Stats | null>(null);
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    fetch(`/api/stats?period=${period}`)
-      .then((r) => r.json())
-      .then(setStats)
-      .catch(() => {});
-  }, [period]);
+    const ac = new AbortController();
+    setStatus('loading');
+    getJson<Stats>(`/api/stats?period=${period}`, { signal: ac.signal })
+      .then((d) => {
+        setStats(d);
+        setStatus('ready');
+      })
+      .catch((err) => {
+        if (!isAbortError(err)) setStatus('error');
+      });
+    return () => ac.abort();
+  }, [period, attempt]);
 
   const tabClass = (p: Period) =>
     `rounded-full px-4 py-1.5 text-sm font-medium ${period === p ? 'bg-white text-black' : 'bg-highlight text-white hover:bg-press'}`;
@@ -54,14 +65,18 @@ export default function StatsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-4 text-3xl font-bold">Listening stats</h1>
-        {(Object.keys(LABELS) as Period[]).map((p) => (
-          <button key={p} className={tabClass(p)} onClick={() => setPeriod(p)}>
-            {LABELS[p]}
-          </button>
-        ))}
+        <div role="tablist" aria-label="Period" className="flex flex-wrap items-center gap-2">
+          {(Object.keys(LABELS) as Period[]).map((p) => (
+            <button key={p} role="tab" aria-selected={period === p} className={tabClass(p)} onClick={() => setPeriod(p)}>
+              {LABELS[p]}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {!stats ? (
+      {status === 'error' ? (
+        <LoadErrorState what="your stats" onRetry={() => setAttempt((n) => n + 1)} />
+      ) : status === 'loading' || !stats ? (
         <div className="space-y-6">
           <StatTilesSkeleton />
           <RowListSkeleton count={5} />
@@ -129,7 +144,7 @@ export default function StatsPage() {
                   <div key={t.id} className="flex items-center gap-3 rounded p-1.5 hover:bg-highlight">
                     <span className="w-5 text-right text-sm text-subdued">{i + 1}</span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`/api/artwork/${t.albumId}`} alt="" className="h-9 w-9 rounded object-cover" />
+                    <img src={`/api/artwork/${t.albumId}`} alt="" className="h-9 w-9 rounded object-cover" loading="lazy" decoding="async" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{t.title}</div>
                       <div className="truncate text-xs text-subdued">{t.artist}</div>
@@ -148,7 +163,13 @@ export default function StatsPage() {
               {stats.topAlbums.map((al) => (
                 <Link key={al.id} href={`/album/${al.id}`} className="rounded bg-base p-3 hover:bg-highlight">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/api/artwork/${al.id}`} alt="" className="mb-2 aspect-square w-full rounded object-cover" />
+                  <img
+                    src={`/api/artwork/${al.id}`}
+                    alt=""
+                    className="mb-2 aspect-square w-full rounded object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
                   <div className="truncate text-sm font-medium">{al.name}</div>
                   <div className="truncate text-xs text-subdued">{al.artist} · {al.plays} plays</div>
                 </Link>

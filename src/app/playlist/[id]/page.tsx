@@ -6,9 +6,11 @@ import { usePlayer } from '@/store/player';
 import TrackList from '@/components/TrackList';
 import PromptModal from '@/components/PromptModal';
 import PlaylistCover from '@/components/PlaylistCover';
+import { LoadErrorState, NotFoundState } from '@/components/Cards';
 import { DetailHeaderSkeleton, RowListSkeleton } from '@/components/Skeleton';
 import { PlayIcon, TrashIcon } from '@/components/Icons';
 import { fmtTotal } from '@/lib/format';
+import { getJson, isAbortError, failureStatus, type LoadStatus } from '@/lib/http';
 import type { Playlist, Track } from '@/lib/types';
 
 type PlaylistDetail = Playlist & { tracks: Track[] };
@@ -16,6 +18,8 @@ type PlaylistDetail = Playlist & { tracks: Track[] };
 export default function PlaylistPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [pl, setPl] = useState<PlaylistDetail | null>(null);
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  const [attempt, setAttempt] = useState(0);
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [checking, setChecking] = useState<string | null>(null);
@@ -23,16 +27,33 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
   const playQueue = usePlayer((s) => s.playQueue);
   const router = useRouter();
 
-  const load = useCallback(() => {
-    fetch(`/api/playlists/${id}`)
-      .then((r) => r.json())
-      .then(setPl)
-      .catch(() => {});
-  }, [id]);
+  // also called after every edit; a failed refetch then keeps the (stale) list rather than blanking the page,
+  // except a 404, which means the playlist is gone
+  const load = useCallback(
+    (signal?: AbortSignal) =>
+      getJson<PlaylistDetail>(`/api/playlists/${id}`, { signal })
+        .then((d) => {
+          setPl(d);
+          setStatus('ready');
+        })
+        .catch((err) => {
+          if (isAbortError(err)) return;
+          const failed = failureStatus(err);
+          setStatus((s) => (failed === 'notfound' || s !== 'ready' ? failed : s));
+        }),
+    [id]
+  );
 
-  useEffect(load, [load]);
+  useEffect(() => {
+    const ac = new AbortController();
+    setStatus('loading');
+    load(ac.signal);
+    return () => ac.abort();
+  }, [load, attempt]);
 
-  if (!pl)
+  if (status === 'notfound') return <NotFoundState what="playlist" />;
+  if (status === 'error') return <LoadErrorState what="this playlist" onRetry={() => setAttempt((n) => n + 1)} />;
+  if (status === 'loading' || !pl)
     return (
       <div className="space-y-6">
         <DetailHeaderSkeleton />
@@ -44,17 +65,19 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
   const missing = pl.tracks.filter((t) => t.missing);
 
   const rename = async (name: string) => {
-    await fetch(`/api/playlists/${id}`, {
+    const res = await fetch(`/api/playlists/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
-    });
+    }).catch(() => null);
     setRenaming(false);
+    if (res?.ok) window.dispatchEvent(new Event('playlists-changed')); // sidebar refreshes its list
     load();
   };
 
   const remove = async () => {
-    await fetch(`/api/playlists/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/playlists/${id}`, { method: 'DELETE' }).catch(() => null);
+    if (res?.ok) window.dispatchEvent(new Event('playlists-changed')); // sidebar refreshes its list
     router.push('/library');
   };
 

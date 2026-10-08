@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { scanLibrary, scanStatus, setAutoScanIntervalMinutes } from '@/lib/scanner';
-import { requireAdmin } from '@/lib/user';
+import { isAdmin, requireAdmin } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  return NextResponse.json(scanStatus());
+// Progress is polled by every profile (library page, setup wizard); the failure text can
+// contain server paths, so only the admin profile sees it.
+export async function GET(req: NextRequest) {
+  const status = scanStatus();
+  if (isAdmin(req) || !status.lastScanError) return NextResponse.json(status);
+  return NextResponse.json({
+    ...status,
+    lastScanError: { at: status.lastScanError.at, message: 'Scan failed (details are shown to the admin profile)' },
+  });
 }
 
 export async function POST(req: NextRequest) {

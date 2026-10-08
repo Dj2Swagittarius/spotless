@@ -4,13 +4,33 @@ import path from 'path';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), 'data');
 
-let db: Database.Database | null = null;
+// Next.js dev HMR re-evaluates this module and would open a fresh connection each
+// time; a globalThis slot keeps one connection per process, like the other modules.
+const dbGlobal = globalThis as typeof globalThis & {
+  __spotlessDb?: Database.Database;
+};
+
 export function getDb(): Database.Database {
-  if (db) return db;
+  if (dbGlobal.__spotlessDb) return dbGlobal.__spotlessDb;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.mkdirSync(path.join(DATA_DIR, 'art'), { recursive: true });
-  db = new Database(path.join(DATA_DIR, 'library.db'));
+  const db = new Database(path.join(DATA_DIR, 'library.db'));
+  try {
+    initSchema(db);
+  } catch (err) {
+    // never cache a half-initialised connection; the next call retries from scratch
+    db.close();
+    throw err;
+  }
+  dbGlobal.__spotlessDb = db;
+  return db;
+}
+
+function initSchema(db: Database.Database): void {
   db.pragma('journal_mode = WAL');
+  // WAL + NORMAL only loses the last transactions on power failure, never corrupts;
+  // it avoids an fsync per autocommit during scans
+  db.pragma('synchronous = NORMAL');
   db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE IF NOT EXISTS artists (
@@ -135,11 +155,36 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_placeholders_playlist ON playlist_placeholders(playlist_id);
   `);
+  ensureIndexes(db);
   const now = Math.floor(Date.now() / 1000);
   db.prepare('DELETE FROM auth_sessions WHERE expires_at <= ?').run(now);
   db.prepare('DELETE FROM auth_login_attempts WHERE window_started_at < ?').run(now - 86400);
-  return db;
 }
+
+/**
+ * Indexes for the hot read paths (artist/album pages, per-user history, likes,
+ * playlist membership, genre and case-insensitive title/album lookups). They run
+ * after every migration so the columns exist; each one is still guarded so an
+ * unexpected old schema degrades to "no index" instead of failing startup.
+ */
+function ensureIndexes(d: Database.Database): void {
+  const indexes: { name: string; table: string; columns: string[]; expr: string }[] = [
+    { name: 'idx_albums_artist', table: 'albums', columns: ['artist_id'], expr: 'artist_id' },
+    { name: 'idx_albums_year', table: 'albums', columns: ['year'], expr: 'year' },
+    { name: 'idx_albums_name_nocase', table: 'albums', columns: ['name'], expr: 'name COLLATE NOCASE' },
+    { name: 'idx_history_user_played', table: 'history', columns: ['user_id', 'played_at'], expr: 'user_id, played_at' },
+    { name: 'idx_history_track', table: 'history', columns: ['track_id'], expr: 'track_id' },
+    { name: 'idx_tracks_genre', table: 'tracks', columns: ['genre'], expr: 'genre' },
+    { name: 'idx_tracks_title_nocase', table: 'tracks', columns: ['title'], expr: 'title COLLATE NOCASE' },
+    { name: 'idx_likes_track', table: 'likes', columns: ['track_id'], expr: 'track_id' },
+    { name: 'idx_playlist_tracks_track', table: 'playlist_tracks', columns: ['track_id'], expr: 'track_id' },
+  ];
+  for (const ix of indexes) {
+    if (!ix.columns.every((c) => hasColumn(d, ix.table, c))) continue;
+    d.exec(`CREATE INDEX IF NOT EXISTS ${ix.name} ON ${ix.table}(${ix.expr})`);
+  }
+}
+
 const hasColumn = (d: Database.Database, table: string, col: string) =>
   (d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === col);
 /** One-time migration to per-user data. Existing likes/history/playlists move to user 1. */

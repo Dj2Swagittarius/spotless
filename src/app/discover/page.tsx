@@ -1,8 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { PlayIcon, PauseIcon, XIcon, MicIcon } from '@/components/Icons';
+import { LoadErrorState } from '@/components/Cards';
 import { CardGridSkeleton } from '@/components/Skeleton';
+import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
 
 interface DiscoverTrack {
   title: string;
@@ -55,11 +58,17 @@ interface DownloadRequest {
 export default function DiscoverPage() {
   const [data, setData] = useState<DiscoverData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  // the in-flight suggestions request: a refresh (or unmount) cancels it so a stale answer never lands later
+  const loadRef = useRef<AbortController | null>(null);
   const [spotifyError, setSpotifyError] = useState<string | null>(null);
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
   const [lidarrConfigured, setLidarrConfigured] = useState(false);
   const [releases, setReleases] = useState<NewRelease[] | null>(null);
+  // the API sets degraded when some Deezer lookups failed, so an empty or short list is not the whole answer
+  const [releasesDegraded, setReleasesDegraded] = useState(false);
   const [gaps, setGaps] = useState<MissingAlbum[] | null>(null);
+  const [gapsDegraded, setGapsDegraded] = useState(false);
   const [gapsLoading, setGapsLoading] = useState(false);
   const [dlQueue, setDlQueue] = useState<{ title: string; artist: string | null; status: string; state: string | null; pct: number }[]>([]);
   // per-artist download state: 'busy' | 'added' | 'searching' | 'requested' | error text
@@ -74,8 +83,10 @@ export default function DiscoverPage() {
   const dlKey = (d: { artist: string | null; title: string }) => `${d.artist ?? ''}|${d.title}`;
   const visibleDl = dlQueue.filter((d) => !dlDismissed.has(dlKey(d)));
 
-  const loadRequests = () =>
-    fetch('/api/requests').then((r) => r.json()).then((d) => setRequests(d.requests ?? [])).catch(() => {});
+  const loadRequests = (signal?: AbortSignal) =>
+    getJson<{ requests?: DownloadRequest[] }>('/api/requests', { signal })
+      .then((d) => setRequests(d.requests ?? []))
+      .catch(() => {});
 
   const actOnRequest = async (id: number, action: 'approve' | 'deny') => {
     setReqErr((e) => ({ ...e, [id]: '' }));
@@ -90,23 +101,45 @@ export default function DiscoverPage() {
   };
 
   const load = (refresh = false) => {
+    loadRef.current?.abort();
+    const ac = new AbortController();
+    loadRef.current = ac;
     setLoading(true);
-    fetch(`/api/discover${refresh ? '?refresh=1' : ''}`)
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => setData({ generatedAt: '', seeds: [], artists: [] }))
-      .finally(() => setLoading(false));
+    setStatus('loading');
+    getJson<DiscoverData>(`/api/discover${refresh ? '?refresh=1' : ''}`, { signal: ac.signal })
+      .then((d) => {
+        setData(d);
+        setStatus('ready');
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (isAbortError(err)) return;
+        setStatus('error');
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
+    const ac = new AbortController();
+    const init = { signal: ac.signal };
     load();
-    fetch('/api/settings/lidarr').then((r) => r.json()).then((d) => setLidarrConfigured(d.configured)).catch(() => {});
-    fetch('/api/users').then((r) => r.json()).then((d) => setIsAdmin(!!d.current?.isAdmin)).catch(() => {});
-    loadRequests();
-    fetch('/api/releases').then((r) => r.json()).then((d) => setReleases(d.releases ?? [])).catch(() => setReleases([]));
+    getJson<{ configured: boolean }>('/api/settings/lidarr', init)
+      .then((d) => setLidarrConfigured(Boolean(d.configured)))
+      .catch(() => {});
+    getJson<{ current?: { isAdmin?: boolean } }>('/api/users', init)
+      .then((d) => setIsAdmin(!!d.current?.isAdmin))
+      .catch(() => {});
+    loadRequests(ac.signal);
+    getJson<{ releases?: NewRelease[]; degraded?: boolean }>('/api/releases', init)
+      .then((d) => {
+        setReleases(d.releases ?? []);
+        setReleasesDegraded(Boolean(d.degraded));
+      })
+      .catch((err) => {
+        if (!isAbortError(err)) setReleases([]);
+      });
     const pollQueue = () =>
-      fetch('/api/lidarr/queue')
-        .then((r) => r.json())
+      getJson<{ items?: typeof dlQueue }>('/api/lidarr/queue', init)
         .then((d) => {
           const items = (d.items ?? []) as typeof dlQueue;
           setDlQueue(items);
@@ -125,6 +158,8 @@ export default function DiscoverPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     return () => {
       clearInterval(qi);
+      ac.abort();
+      loadRef.current?.abort();
       audioRef.current?.pause();
     };
   }, []);
@@ -168,16 +203,16 @@ export default function DiscoverPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ artist }),
-    });
-    const data = await res.json();
-    setDlState((s) => ({ ...s, [artist]: res.ok ? data.status : `error: ${data.error}` }));
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    setDlState((s) => ({ ...s, [artist]: res?.ok ? data.status : `error: ${data.error ?? 'request failed'}` }));
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-3xl font-bold">Discover</h1>
-        <a href="/trending" className="btn-pill px-3 py-1 md:hidden">Trending →</a>
+        <Link href="/trending" className="btn-pill px-3 py-1 md:hidden">Trending →</Link>
         <div className="flex-1" />
         <button
           onClick={() => load(true)}
@@ -284,12 +319,15 @@ export default function DiscoverPage() {
       {releases && releases.length > 0 && (
         <section>
           <h2 className="mb-3 text-xl font-bold">New releases from your artists</h2>
+          {releasesDegraded && (
+            <p className="mb-3 text-sm text-subdued">Some lookups failed; this list may be incomplete.</p>
+          )}
           <div className="flex gap-3 overflow-x-auto pb-2">
             {releases.map((r) => (
               <div key={`${r.artist}-${r.title}`} className="w-40 shrink-0 rounded-lg bg-elevated p-3">
                 {r.cover ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={r.cover} alt="" className="mb-2 aspect-square w-full rounded object-cover" />
+                  <img src={r.cover} alt="" className="mb-2 aspect-square w-full rounded object-cover" loading="lazy" decoding="async" />
                 ) : (
                   <div className="mb-2 aspect-square w-full rounded bg-highlight" />
                 )}
@@ -347,6 +385,8 @@ export default function DiscoverPage() {
         <p className="text-sm text-subdued">Based on your listening: {data.seeds.join(', ')}</p>
       )}
 
+      {status === 'error' && <LoadErrorState what="suggestions" onRetry={() => load()} />}
+
       {loading && (
         <div className="space-y-3">
           <div className="text-sm text-subdued">Finding new music for you…</div>
@@ -363,8 +403,13 @@ export default function DiscoverPage() {
           <button
             onClick={async () => {
               setGapsLoading(true);
-              const d = await fetch('/api/collection').then((r) => r.json()).catch(() => ({ missing: [] }));
+              // a failed request counts as degraded too: "collection complete" must never be shown for it
+              const d = await getJson<{ missing?: MissingAlbum[]; degraded?: boolean }>('/api/collection').catch(() => ({
+                missing: [],
+                degraded: true,
+              }));
               setGaps(d.missing ?? []);
+              setGapsDegraded(Boolean(d.degraded));
               setGapsLoading(false);
             }}
             disabled={gapsLoading}
@@ -373,7 +418,12 @@ export default function DiscoverPage() {
             {gapsLoading ? 'Checking…' : gaps ? 'Refresh' : 'Show gaps'}
           </button>
         </div>
-        {gaps && gaps.length === 0 && <div className="mt-3 text-sm text-subdued">No gaps found — collection complete for your top artists.</div>}
+        {gaps && gapsDegraded && (
+          <div className="mt-3 text-sm text-subdued">Some lookups failed; this list may be incomplete.</div>
+        )}
+        {gaps && gaps.length === 0 && !gapsDegraded && (
+          <div className="mt-3 text-sm text-subdued">No gaps found — collection complete for your top artists.</div>
+        )}
         {gaps && gaps.length > 0 && (
           <div className="mt-4 grid max-h-96 grid-cols-1 gap-1 overflow-y-auto md:grid-cols-2">
             {gaps.map((g) => {
@@ -383,7 +433,7 @@ export default function DiscoverPage() {
                 <div key={key} className="flex items-center gap-3 rounded p-1.5 hover:bg-highlight">
                   {g.cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={g.cover} alt="" className="h-10 w-10 rounded object-cover" />
+                    <img src={g.cover} alt="" className="h-10 w-10 rounded object-cover" loading="lazy" decoding="async" />
                   ) : (
                     <div className="h-10 w-10 rounded bg-highlight" />
                   )}
@@ -411,7 +461,8 @@ export default function DiscoverPage() {
                           setDlState((s) => ({ ...s, [key]: res.ok ? (d.status === 'requested' ? 'requested' : 'sent') : 'busy' }));
                         }}
                         className="rounded-full border border-border px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-subdued hover:border-white hover:text-white"
-                        title={isAdmin ? 'Get via Lidarr' : 'Request download'}
+                        title={isAdmin ? `Get "${g.title}" via Lidarr` : `Request download of "${g.title}"`}
+                        aria-label={isAdmin ? `Get "${g.title}" via Lidarr` : `Request download of "${g.title}"`}
                       >
                         ⤓
                       </button>
@@ -445,7 +496,7 @@ export default function DiscoverPage() {
               <div className="mb-3 flex items-center gap-3">
                 {a.image ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={a.image} alt="" className="h-16 w-16 rounded-full object-cover" />
+                  <img src={a.image} alt="" className="h-16 w-16 rounded-full object-cover" loading="lazy" decoding="async" />
                 ) : (
                   <div className="flex h-16 w-16 items-center justify-center rounded-full bg-highlight"><MicIcon size={24} className="text-subdued" /></div>
                 )}
@@ -491,7 +542,7 @@ export default function DiscoverPage() {
                   <div key={t.title} className="flex items-center gap-2 rounded p-1.5 hover:bg-highlight">
                     {t.cover ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={t.cover} alt="" className="h-9 w-9 rounded object-cover" />
+                      <img src={t.cover} alt="" className="h-9 w-9 rounded object-cover" loading="lazy" decoding="async" />
                     ) : (
                       <div className="h-9 w-9 rounded bg-highlight" />
                     )}
@@ -503,6 +554,7 @@ export default function DiscoverPage() {
                       onClick={() => togglePreview(`${a.name}|${t.title}`, a.name, t.title)}
                       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 hover:bg-accent hover:text-black md:h-8 md:w-8"
                       title="30-second preview"
+                      aria-label={`Preview ${t.title}`}
                     >
                       {playingUrl === `${a.name}|${t.title}` ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
                     </button>

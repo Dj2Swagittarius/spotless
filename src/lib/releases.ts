@@ -12,17 +12,63 @@ export interface NewRelease {
 
 const CACHE_KEY = 'releases_cache';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// A result built while Deezer was failing is kept only briefly, so an outage doesn't pin an
+// empty or partial page for a whole day.
+const DEGRADED_TTL_MS = 10 * 60 * 1000;
 const MAX_ARTISTS = 40;
 const WINDOW_DAYS = 120;
 
-async function deezer<T>(path: string): Promise<T | null> {
+/** Outcome tally for one build, so the caller can tell "nothing to show" from "Deezer was down". */
+interface DeezerStats {
+  ok: number;
+  failed: number;
+}
+
+async function deezer<T>(path: string, stats: DeezerStats): Promise<T | null> {
   try {
     const res = await fetch(`https://api.deezer.com${path}`, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    if (!res.ok) {
+      stats.failed++;
+      return null;
+    }
+    const json = (await res.json()) as T | { error?: unknown } | null;
+    // Deezer reports quota and lookup failures as HTTP 200 with an { error: {...} } envelope.
+    if (!json || typeof json !== 'object' || ('error' in json && json.error)) {
+      stats.failed++;
+      return null;
+    }
+    stats.ok++;
+    return json as T;
   } catch {
+    stats.failed++;
     return null;
   }
+}
+
+interface CachedBuild {
+  generatedAt: string;
+  degraded?: boolean;
+}
+
+function readCache<T extends CachedBuild>(key: string): T | null {
+  const raw = getSetting(key);
+  if (!raw) return null;
+  try {
+    const cached = JSON.parse(raw) as T;
+    const ttl = cached.degraded ? DEGRADED_TTL_MS : CACHE_TTL_MS;
+    if (Date.now() - new Date(cached.generatedAt).getTime() < ttl) return cached;
+  } catch {
+    // rebuild below
+  }
+  return null;
+}
+
+/**
+ * Whether a build is incomplete and should expire early. No library artists is a genuine
+ * (empty) answer worth the full TTL; any failed lookup means artists are missing from the list.
+ */
+function isDegraded(artistCount: number, stats: DeezerStats): boolean {
+  return artistCount > 0 && stats.failed > 0;
 }
 
 function norm(s: string): string {
@@ -52,7 +98,7 @@ interface ArtistGroup {
  * ("DJ Tiesto", "Tiesto", "Tiësto") into one group per Deezer id with their owned albums pooled —
  * otherwise the same albums get listed once per spelling and owned ones look "missing".
  */
-async function resolveArtistGroups(): Promise<ArtistGroup[]> {
+async function resolveArtistGroups(stats: DeezerStats): Promise<{ groups: ArtistGroup[]; artistCount: number }> {
   const db = getDb();
   const artists = db
     .prepare('SELECT a.id, a.name FROM artists a JOIN tracks t ON t.artist_id = a.id GROUP BY a.id ORDER BY COUNT(*) DESC LIMIT ?')
@@ -69,7 +115,7 @@ async function resolveArtistGroups(): Promise<ArtistGroup[]> {
   }
 
   const resolved = await chunked(artists, 15, async (a) => {
-    const search = await deezer<{ data: { id: number }[] }>(`/search/artist?q=${encodeURIComponent(a.name)}&limit=1`);
+    const search = await deezer<{ data: { id: number }[] }>(`/search/artist?q=${encodeURIComponent(a.name)}&limit=1`, stats);
     return { a, dzId: search?.data?.[0]?.id ?? null };
   });
 
@@ -83,28 +129,30 @@ async function resolveArtistGroups(): Promise<ArtistGroup[]> {
     }
     for (const t of ownedByArtist.get(foldText(a.name)) ?? []) g.owned.add(t);
   }
-  return [...groups.values()];
+  return { groups: [...groups.values()], artistCount: artists.length };
 }
 
-export async function buildReleases(force = false): Promise<{ generatedAt: string; releases: NewRelease[] }> {
+export interface ReleasesResult {
+  generatedAt: string;
+  releases: NewRelease[];
+  /** Set when some Deezer lookups failed, so the list may be incomplete. */
+  degraded?: boolean;
+}
+
+export async function buildReleases(force = false): Promise<ReleasesResult> {
   if (!force) {
-    const raw = getSetting(CACHE_KEY);
-    if (raw) {
-      try {
-        const cached = JSON.parse(raw);
-        if (Date.now() - new Date(cached.generatedAt).getTime() < CACHE_TTL_MS) return cached;
-      } catch {
-        // rebuild below
-      }
-    }
+    const cached = readCache<ReleasesResult>(CACHE_KEY);
+    if (cached) return cached;
   }
 
-  const groups = await resolveArtistGroups();
+  const stats: DeezerStats = { ok: 0, failed: 0 };
+  const { groups, artistCount } = await resolveArtistGroups(stats);
   const cutoff = new Date(Date.now() - WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
 
   const perArtist = await chunked(groups, 15, async (g) => {
     const albums = await deezer<{ data: { title: string; cover_medium: string | null; release_date: string; record_type: string; link: string }[] }>(
-      `/artist/${g.dzId}/albums?limit=50`
+      `/artist/${g.dzId}/albums?limit=50`,
+      stats
     );
     return (albums?.data ?? [])
       .filter((al) => al.release_date >= cutoff)
@@ -133,8 +181,11 @@ export async function buildReleases(force = false): Promise<{ generatedAt: strin
     .sort((a, b) => b.releaseDate.localeCompare(a.releaseDate))
     .slice(0, 40);
 
-  const result = { generatedAt: new Date().toISOString(), releases };
-  if (releases.length > 0 || groups.length === 0) setSetting(CACHE_KEY, JSON.stringify(result));
+  const result: ReleasesResult = { generatedAt: new Date().toISOString(), releases };
+  // Cache even an empty list when every lookup answered: that is a real "nothing new" result.
+  // A degraded build is cached too, but readCache expires it after DEGRADED_TTL_MS.
+  if (isDegraded(artistCount, stats)) result.degraded = true;
+  setSetting(CACHE_KEY, JSON.stringify(result));
   return result;
 }
 
@@ -152,25 +203,27 @@ const GAPS_PER_ARTIST = 10;
 const VARIANT_NOISE =
   /\b(remix(es|ed)?|live|karaoke|instrumental|acoustic|a?nniversary|deluxe|expanded|extended|edition|best of|greatest hits|anthology|essentials?|megamix|mixtape|dj mix|mixed by|commentary|demos?|b-sides)\b/i;
 
+export interface CollectionGapsResult {
+  generatedAt: string;
+  missing: MissingAlbum[];
+  /** Set when some Deezer lookups failed, so the list may be incomplete. */
+  degraded?: boolean;
+}
+
 /** Studio albums your artists released that aren't in the library — any age, not just new. */
-export async function buildCollectionGaps(force = false): Promise<{ generatedAt: string; missing: MissingAlbum[] }> {
+export async function buildCollectionGaps(force = false): Promise<CollectionGapsResult> {
   if (!force) {
-    const raw = getSetting(COLLECTION_CACHE_KEY);
-    if (raw) {
-      try {
-        const cached = JSON.parse(raw);
-        if (Date.now() - new Date(cached.generatedAt).getTime() < CACHE_TTL_MS) return cached;
-      } catch {
-        // rebuild below
-      }
-    }
+    const cached = readCache<CollectionGapsResult>(COLLECTION_CACHE_KEY);
+    if (cached) return cached;
   }
 
-  const groups = await resolveArtistGroups();
+  const stats: DeezerStats = { ok: 0, failed: 0 };
+  const { groups, artistCount } = await resolveArtistGroups(stats);
 
   const perArtist = await chunked(groups, 15, async (g) => {
     const albums = await deezer<{ data: { title: string; cover_medium: string | null; release_date: string; record_type: string; link: string }[] }>(
-      `/artist/${g.dzId}/albums?limit=100`
+      `/artist/${g.dzId}/albums?limit=100`,
+      stats
     );
     return (albums?.data ?? [])
       .filter((al) => al.record_type === 'album') // studio albums only, skip single/EP noise
@@ -198,7 +251,8 @@ export async function buildCollectionGaps(force = false): Promise<{ generatedAt:
     })
     .sort((a, b) => a.artist.localeCompare(b.artist) || b.releaseDate.localeCompare(a.releaseDate));
 
-  const result = { generatedAt: new Date().toISOString(), missing };
-  if (missing.length > 0 || groups.length === 0) setSetting(COLLECTION_CACHE_KEY, JSON.stringify(result));
+  const result: CollectionGapsResult = { generatedAt: new Date().toISOString(), missing };
+  if (isDegraded(artistCount, stats)) result.degraded = true;
+  setSetting(COLLECTION_CACHE_KEY, JSON.stringify(result));
   return result;
 }

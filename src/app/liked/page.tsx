@@ -4,24 +4,38 @@ import { useEffect, useState } from 'react';
 import { usePlayer } from '@/store/player';
 import { useLikes } from '@/store/likes';
 import TrackList from '@/components/TrackList';
+import { LoadErrorState } from '@/components/Cards';
 import { DetailHeaderSkeleton, RowListSkeleton } from '@/components/Skeleton';
 import { PlayIcon, HeartIcon } from '@/components/Icons';
 import { fmtTotal } from '@/lib/format';
+import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
 import type { Track } from '@/lib/types';
 
 export default function LikedPage() {
   const [tracks, setTracks] = useState<Track[] | null>(null);
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  const [attempt, setAttempt] = useState(0);
   const playQueue = usePlayer((s) => s.playQueue);
   const likedCount = useLikes((s) => s.ids.size);
 
+  // refetches on every like/unlike; while a list is already showing, keep it up during the refetch
+  // and leave it in place if that refetch fails instead of swapping the page for an error
   useEffect(() => {
-    fetch('/api/likes?full=1')
-      .then((r) => r.json())
-      .then(setTracks)
-      .catch(() => {});
-  }, [likedCount]);
+    const ac = new AbortController();
+    setStatus((s) => (s === 'ready' ? s : 'loading'));
+    getJson<Track[]>('/api/likes?full=1', { signal: ac.signal })
+      .then((d) => {
+        setTracks(d);
+        setStatus('ready');
+      })
+      .catch((err) => {
+        if (!isAbortError(err)) setStatus((s) => (s === 'ready' ? s : 'error'));
+      });
+    return () => ac.abort();
+  }, [likedCount, attempt]);
 
-  if (!tracks)
+  if (status === 'error') return <LoadErrorState what="your liked songs" onRetry={() => setAttempt((n) => n + 1)} />;
+  if (status === 'loading' || !tracks)
     return (
       <div className="space-y-6">
         <DetailHeaderSkeleton />
@@ -51,6 +65,7 @@ export default function LikedPage() {
           onClick={() => playQueue(tracks, 0)}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-accent text-black shadow-lg transition-transform hover:scale-105 hover:bg-accentBright"
           title="Play"
+          aria-label="Play liked songs"
         >
           <PlayIcon size={24} />
         </button>
