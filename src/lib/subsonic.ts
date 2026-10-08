@@ -48,9 +48,12 @@ function safeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(ab, bb);
 }
 
-/** Resolve the acting user from Subsonic auth params (u + t/s token, or u + p password). */
-export function authenticate(req: NextRequest): SubUser | null {
-  const q = req.nextUrl.searchParams;
+/**
+ * Resolve the acting user from Subsonic auth params (u + t/s token, or u + p password).
+ * `params` defaults to the query string; the REST route passes query + POST form fields merged.
+ */
+export function authenticate(req: NextRequest, params: URLSearchParams = req.nextUrl.searchParams): SubUser | null {
+  const q = params;
   const username = q.get('u');
   if (!username) return null;
   const user = getDb()
@@ -74,10 +77,17 @@ export function authenticate(req: NextRequest): SubUser | null {
 
 // ---------- response envelopes ----------
 
-type Body = Record<string, unknown>;
+export type Body = Record<string, unknown>;
 
 function xmlEscape(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // XML 1.0 forbids most C0 controls even when escaped; tags with stray bytes would otherwise
+  // produce documents that strict parsers (and most mobile clients) reject outright.
+  return s
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /** Subsonic's JSON structure maps 1:1 to its XML: primitives → attributes, objects/arrays → children, `value` → text. */
@@ -100,13 +110,30 @@ function toXml(name: string, obj: unknown): string {
   return `${open}>${text}${children.join('')}</${name}>`;
 }
 
-export function subsonicResponse(req: NextRequest, body: Body = {}, status: 'ok' | 'failed' = 'ok'): Response {
-  const payload = { status, version: SUBSONIC_VERSION, type: SERVER, serverVersion: '0.2.0', ...body };
-  const format = req.nextUrl.searchParams.get('f') ?? 'xml';
+/**
+ * Wrap `body` in the Subsonic envelope. `params` (query + POST form fields merged) decides the
+ * output format; it defaults to the query string so callers outside the REST route keep working.
+ */
+export function subsonicResponse(
+  req: NextRequest,
+  body: Body = {},
+  status: 'ok' | 'failed' = 'ok',
+  params: URLSearchParams = req.nextUrl.searchParams
+): Response {
+  // openSubsonic: true is what clients check before trusting getOpenSubsonicExtensions
+  const payload = {
+    status,
+    version: SUBSONIC_VERSION,
+    type: SERVER,
+    serverVersion: '0.2.0',
+    openSubsonic: true,
+    ...body,
+  };
+  const format = params.get('f') ?? 'xml';
   if (format.startsWith('json')) {
     const json = JSON.stringify({ 'subsonic-response': payload });
     if (format === 'jsonp') {
-      const raw = req.nextUrl.searchParams.get('callback') ?? 'callback';
+      const raw = params.get('callback') ?? 'callback';
       // only allow a plain JS identifier/member path — reject anything that could inject
       const cb = /^[A-Za-z_$][\w$.]*$/.test(raw) ? raw : 'callback';
       return new Response(`${cb}(${json});`, { headers: { 'Content-Type': 'application/javascript' } });
@@ -119,8 +146,8 @@ export function subsonicResponse(req: NextRequest, body: Body = {}, status: 'ok'
   });
 }
 
-export function subsonicError(req: NextRequest, code: number, message: string): Response {
-  return subsonicResponse(req, { error: { code, message } }, 'failed');
+export function subsonicError(req: NextRequest, code: number, message: string, params?: URLSearchParams): Response {
+  return subsonicResponse(req, { error: { code, message } }, 'failed', params);
 }
 
 // ---------- id namespaces ----------
@@ -172,7 +199,7 @@ export const TRACK_SQL = `
   SELECT t.id, t.title, t.duration, t.track_no, t.disc_no, t.genre, t.path, t.mtime,
          t.album_id, t.artist_id, al.name AS album, ar.name AS artist, al.year,
          (SELECT liked_at FROM likes l WHERE l.track_id = t.id AND l.user_id = @uid) AS starred,
-         (SELECT COUNT(*) FROM history h WHERE h.track_id = t.id) AS playCount
+         (SELECT COUNT(*) FROM history h WHERE h.track_id = t.id AND h.user_id = @uid) AS playCount
   FROM tracks t JOIN albums al ON al.id = t.album_id JOIN artists ar ON ar.id = t.artist_id
 `;
 
