@@ -83,7 +83,7 @@ export default function FolderPicker({
             onChange={(e) => setManual(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && browse(manual.trim())}
             placeholder="Type a path or browse below"
-            className="min-w-0 flex-1 rounded bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued focus:outline-none focus:ring-1 focus:ring-white/50"
+            className="min-w-0 flex-1 rounded-sm bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued focus:outline-hidden focus:ring-1 focus:ring-white/50"
           />
           <button
             onClick={() => browse(manual.trim())}
@@ -93,9 +93,9 @@ export default function FolderPicker({
           </button>
         </div>
 
-        {error && <div className="mb-3 rounded bg-negative/10 px-3 py-2 text-sm text-negative">{error}</div>}
+        {error && <div className="mb-3 rounded-sm bg-negative/10 px-3 py-2 text-sm text-negative">{error}</div>}
 
-        <div className="min-h-0 flex-1 overflow-y-auto rounded bg-base">
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-sm bg-base">
           {current?.parent !== null && current !== null && (
             <button
               onClick={() => browse(current.parent!)}

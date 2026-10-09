@@ -120,7 +120,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
   };
 
   const input =
-    'w-full rounded bg-highlight px-3 py-2.5 text-sm text-white placeholder:text-subdued outline-none focus:shadow-insetBorder';
+    'w-full rounded-sm bg-highlight px-3 py-2.5 text-sm text-white placeholder:text-subdued outline-hidden focus:shadow-insetBorder';
 
   const SkipButton = ({ to }: { to: number }) => (
     <button onClick={() => setStep(to)} className="rounded-full px-4 py-1.5 text-sm font-medium text-subdued hover:text-white">
@@ -129,7 +129,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
   );
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-base p-4">
+    <div className="fixed inset-0 z-100 flex items-center justify-center overflow-y-auto bg-base p-4">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
@@ -246,7 +246,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
               <p className="text-sm text-subdued">
                 Spotless scans this folder for audio files. In Docker it&apos;s the volume mounted at <span className="text-white">/music</span>.
               </p>
-              <div className="rounded bg-highlight px-3 py-2.5 text-sm">
+              <div className="rounded-sm bg-highlight px-3 py-2.5 text-sm">
                 <span className="text-subdued">Folder: </span>
                 <span className="break-all">{musicDir || '…'}</span>
               </div>
@@ -276,7 +276,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
               <input className={input} value={lidarrUrl} onChange={(e) => setLidarrUrl(e.target.value)} placeholder="http://lidarr:8686" />
               <input className={input} value={lidarrKey} onChange={(e) => setLidarrKey(e.target.value)} type="password" placeholder="API key" />
               {lidarrMsg && (
-                <div className={`rounded px-3 py-2 text-sm ${lidarrMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+                <div className={`rounded-sm px-3 py-2 text-sm ${lidarrMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
                   {lidarrMsg.text}
                 </div>
               )}

@@ -60,7 +60,7 @@ export default function ArtistPage({ params }: { params: Promise<{ id: string }>
 
   return (
     <div className="space-y-8">
-      <header className="flex items-end gap-6 rounded-lg bg-gradient-to-b from-white/10 to-transparent p-6">
+      <header className="flex items-end gap-6 rounded-lg bg-linear-to-b from-white/10 to-transparent p-6">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={`/api/artwork/artist/${artist.id}?l=${encodeURIComponent(artist.name.charAt(0))}`}

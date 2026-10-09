@@ -37,7 +37,7 @@ interface Cfg {
 
 type Msg = { ok: boolean; text: string } | null;
 
-const input = 'w-full rounded bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued outline-none focus:shadow-insetBorder';
+const input = 'w-full rounded-sm bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued outline-hidden focus:shadow-insetBorder';
 const label = 'mb-1 block text-xs font-semibold uppercase tracking-wider text-subdued';
 
 /** Settings → AI DJ (admin only): language model, voice and speech recognition. */
@@ -176,10 +176,10 @@ export default function DjSettings() {
   };
 
   const hostedWarning = (local: boolean, what: string) =>
-    !local && <div className="rounded bg-[#ffa42b]/10 px-3 py-2 text-xs text-[#ffa42b]">{what} will be sent to a hosted service, outside your server.</div>;
+    !local && <div className="rounded-sm bg-warning/10 px-3 py-2 text-xs text-warning">{what} will be sent to a hosted service, outside your server.</div>;
 
   const message = (m: Msg) =>
-    m && <div className={`rounded px-3 py-2 text-sm ${m.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>{m.text}</div>;
+    m && <div className={`rounded-sm px-3 py-2 text-sm ${m.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>{m.text}</div>;
 
   return (
     <div className="space-y-6">

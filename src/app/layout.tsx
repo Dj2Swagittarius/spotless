@@ -16,7 +16,7 @@ const figtree = localFont({
 const bricolage = localFont({
   src: './fonts/bricolage-grotesque-latin-wght-normal.woff2',
   weight: '200 800',
-  variable: '--font-display',
+  variable: '--font-display-face',
   display: 'swap',
 });
 

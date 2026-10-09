@@ -294,7 +294,7 @@ export default function DjPage() {
   return (
     <div className="mx-auto flex min-h-[calc(100dvh-12rem)] max-w-3xl flex-col">
       <header className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-accent to-indigo-600 text-black">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-accent to-indigo-600 text-black">
           <DjIcon size={26} />
         </div>
         <div className="min-w-0 flex-1">
@@ -425,7 +425,7 @@ export default function DjPage() {
                     const k = `${s.artist}|${s.title}`;
                     return (
                       <div key={k} className="flex gap-3 rounded-lg bg-highlight p-2">
-                        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded bg-press">
+                        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-sm bg-press">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           {s.cover && <img src={s.cover} alt="" className="h-full w-full object-cover" />}
                           {s.previewUrl && (
@@ -470,7 +470,7 @@ export default function DjPage() {
         <div ref={endRef} />
       </div>
 
-      <div className="sticky bottom-0 mt-4 space-y-2 bg-gradient-to-t from-base via-base to-transparent pb-1 pt-4">
+      <div className="sticky bottom-0 mt-4 space-y-2 bg-linear-to-t from-base via-base to-transparent pb-1 pt-4">
         {messages.length > 0 && (
           <div className="flex gap-2 overflow-x-auto pb-1">
             {QUICK.slice(1).map((q) => (
@@ -481,7 +481,7 @@ export default function DjPage() {
           </div>
         )}
         {micError && (
-          <div className="flex items-center gap-2 rounded bg-negative/10 px-3 py-1.5 text-xs text-negative">
+          <div className="flex items-center gap-2 rounded-sm bg-negative/10 px-3 py-1.5 text-xs text-negative">
             <span className="flex-1">{micError}</span>
             <button onClick={() => setMicError('')} aria-label="Dismiss">
               <XIcon size={14} />
@@ -518,7 +518,7 @@ export default function DjPage() {
             }}
             rows={1}
             placeholder={transcribing ? 'Listening back…' : `Ask ${djName} for anything…`}
-            className="max-h-32 min-h-10 flex-1 resize-none rounded-2xl bg-highlight px-4 py-2.5 text-sm text-white outline-none placeholder:text-subdued focus:shadow-insetBorder"
+            className="max-h-32 min-h-10 flex-1 resize-none rounded-2xl bg-highlight px-4 py-2.5 text-sm text-white outline-hidden placeholder:text-subdued focus:shadow-insetBorder"
             disabled={!status?.ready}
           />
           <button
@@ -598,7 +598,7 @@ function ProposedPlaylistCard({
           maxLength={100}
           placeholder="Playlist name"
           aria-label="Playlist name"
-          className="min-w-0 flex-1 rounded bg-press px-2 py-1 text-xs text-white outline-none focus:shadow-insetBorder"
+          className="min-w-0 flex-1 rounded-sm bg-press px-2 py-1 text-xs text-white outline-hidden focus:shadow-insetBorder"
         />
         <button type="submit" disabled={saving || !name.trim()} className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-black disabled:opacity-40">
           {saving ? 'Saving…' : 'Save playlist'}
@@ -612,7 +612,7 @@ function ProposedPlaylistCard({
         {shown.map((t, i) => (
           <li key={`${t.id}-${i}`} className="flex items-center gap-2 text-xs">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={`/api/artwork/${t.albumId}`} alt="" className="h-8 w-8 rounded object-cover" loading="lazy" />
+            <img src={`/api/artwork/${t.albumId}`} alt="" className="h-8 w-8 rounded-sm object-cover" loading="lazy" />
             <div className="min-w-0">
               <div className="truncate font-semibold">{t.title}</div>
               <div className="truncate text-subdued">{t.artist}</div>
@@ -621,7 +621,7 @@ function ProposedPlaylistCard({
         ))}
         {(open ? proposed.missing : proposed.missing.slice(0, Math.max(0, 5 - shown.length))).map((s, i) => (
           <li key={`m-${i}`} className="flex items-center gap-2 text-xs text-subdued">
-            <div className="flex h-8 w-8 items-center justify-center rounded bg-press">?</div>
+            <div className="flex h-8 w-8 items-center justify-center rounded-sm bg-press">?</div>
             <div className="min-w-0">
               <div className="truncate font-semibold">{s.title}</div>
               <div className="truncate">{s.artist} · not in your library</div>
@@ -732,7 +732,7 @@ function TrackCard({
             maxLength={100}
             placeholder="Playlist name"
             aria-label="Playlist name"
-            className="min-w-0 flex-1 rounded bg-press px-2 py-1 text-xs text-white outline-none focus:shadow-insetBorder"
+            className="min-w-0 flex-1 rounded-sm bg-press px-2 py-1 text-xs text-white outline-hidden focus:shadow-insetBorder"
           />
           <button type="submit" disabled={saving || !name.trim()} className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-black disabled:opacity-40">
             {saving ? 'Saving…' : 'Save'}
@@ -747,7 +747,7 @@ function TrackCard({
         {shown.map((t, i) => (
           <li key={`${t.id}-${i}`} className="flex items-center gap-2 text-xs">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={`/api/artwork/${t.albumId}`} alt="" className="h-8 w-8 rounded object-cover" loading="lazy" />
+            <img src={`/api/artwork/${t.albumId}`} alt="" className="h-8 w-8 rounded-sm object-cover" loading="lazy" />
             <div className="min-w-0">
               <div className="truncate font-semibold">{t.title}</div>
               <div className="truncate text-subdued">{t.artist}</div>

@@ -61,7 +61,7 @@ function PasswordForm({
           onChange={(e) => setCurrentPassword(e.target.value)}
           placeholder="Current password"
           maxLength={128}
-          className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
+          className="w-full rounded-sm bg-highlight px-3 py-2 text-sm outline-hidden focus:shadow-insetBorder"
         />
       )}
       <input
@@ -71,7 +71,7 @@ function PasswordForm({
         onChange={(e) => setNewPassword(e.target.value)}
         placeholder={isSelf ? 'New password' : `New password for ${user.name}`}
         maxLength={128}
-        className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
+        className="w-full rounded-sm bg-highlight px-3 py-2 text-sm outline-hidden focus:shadow-insetBorder"
       />
       <input
         type="password"
@@ -80,7 +80,7 @@ function PasswordForm({
         onChange={(e) => setConfirm(e.target.value)}
         placeholder="Confirm new password"
         maxLength={128}
-        className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
+        className="w-full rounded-sm bg-highlight px-3 py-2 text-sm outline-hidden focus:shadow-insetBorder"
       />
       <div className="text-xs text-subdued">A PIN is fine on a home network; use a long passphrase if Spotless is reachable from the internet.</div>
       {error && <div className="text-sm text-negative">{error}</div>}
@@ -156,7 +156,7 @@ export default function UsersPage() {
         </p>
       </div>
 
-      {message && <div className="rounded bg-accent/10 px-3 py-2 text-sm text-accent">{message}</div>}
+      {message && <div className="rounded-sm bg-accent/10 px-3 py-2 text-sm text-accent">{message}</div>}
 
       {me.isAdmin && (
         <section className="rounded-lg bg-elevated p-5">
@@ -168,7 +168,7 @@ export default function UsersPage() {
               placeholder="Profile name"
               maxLength={30}
               autoComplete="off"
-              className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
+              className="w-full rounded-sm bg-highlight px-3 py-2 text-sm outline-hidden focus:shadow-insetBorder"
             />
             <input
               type="password"
@@ -177,7 +177,7 @@ export default function UsersPage() {
               placeholder="Password or passphrase"
               maxLength={128}
               autoComplete="new-password"
-              className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
+              className="w-full rounded-sm bg-highlight px-3 py-2 text-sm outline-hidden focus:shadow-insetBorder"
             />
             <input
               type="password"
@@ -186,7 +186,7 @@ export default function UsersPage() {
               placeholder="Confirm password"
               maxLength={128}
               autoComplete="new-password"
-              className="w-full rounded bg-highlight px-3 py-2 text-sm outline-none focus:shadow-insetBorder"
+              className="w-full rounded-sm bg-highlight px-3 py-2 text-sm outline-hidden focus:shadow-insetBorder"
             />
             <div className="text-xs text-subdued">A PIN is fine on a home network; use a long passphrase if Spotless is reachable from the internet.</div>
             {error && <div className="text-sm text-negative">{error}</div>}

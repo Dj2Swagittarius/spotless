@@ -61,9 +61,9 @@ export default function AlbumPage({ params }: { params: Promise<{ id: string }> 
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col items-center gap-6 rounded-lg bg-gradient-to-b from-white/10 to-transparent p-6 sm:flex-row sm:items-end">
+      <header className="flex flex-col items-center gap-6 rounded-lg bg-linear-to-b from-white/10 to-transparent p-6 sm:flex-row sm:items-end">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`/api/artwork/${album.id}`} alt={album.name} className="h-48 w-48 rounded shadow-2xl sm:h-56 sm:w-56" />
+        <img src={`/api/artwork/${album.id}`} alt={album.name} className="h-48 w-48 rounded-sm shadow-2xl sm:h-56 sm:w-56" />
         <div className="text-center sm:text-left">
           <div className="text-sm font-medium">Album</div>
           <h1 className="my-2 text-4xl font-extrabold sm:text-5xl">{album.name}</h1>
@@ -93,7 +93,7 @@ export default function AlbumPage({ params }: { params: Promise<{ id: string }> 
         <div className="space-y-6">
           {discs.map((d) => (
             <section key={d.disc}>
-              <h2 className="mb-2 px-2 text-sm font-bold uppercase tracking-[0.1em] text-subdued">Disc {d.disc}</h2>
+              <h2 className="mb-2 px-2 text-sm font-bold uppercase tracking-widest text-subdued">Disc {d.disc}</h2>
               <TrackList tracks={d.tracks} queue={album.tracks} numberFrom="trackNo" showAlbum={false} showArt={false} />
             </section>
           ))}

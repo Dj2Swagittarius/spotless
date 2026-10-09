@@ -199,7 +199,7 @@ function Search() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search your library and beyond…"
-          className="w-full rounded-full bg-highlight py-3 pl-11 pr-4 text-sm font-medium placeholder-subdued outline-none focus:shadow-insetBorder"
+          className="w-full rounded-full bg-highlight py-3 pl-11 pr-4 text-sm font-medium placeholder-subdued outline-hidden focus:shadow-insetBorder"
         />
       </div>
 
@@ -291,9 +291,9 @@ function Search() {
                     <div key={`${al.artist}-${al.title}`} className="w-40 shrink-0 rounded-lg bg-elevated p-3">
                       {al.cover ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={al.cover} alt="" className="mb-2 aspect-square w-full rounded object-cover" loading="lazy" decoding="async" />
+                        <img src={al.cover} alt="" className="mb-2 aspect-square w-full rounded-sm object-cover" loading="lazy" decoding="async" />
                       ) : (
-                        <div className="mb-2 aspect-square w-full rounded bg-highlight" />
+                        <div className="mb-2 aspect-square w-full rounded-sm bg-highlight" />
                       )}
                       <div className="truncate text-sm font-semibold" title={al.title}>{al.title}</div>
                       <div className="mb-2 truncate text-xs text-subdued">{al.artist}</div>
@@ -313,12 +313,12 @@ function Search() {
                   const k = `tr|${t.artist}|${t.title}`;
                   const playing = playingUrl !== null && playingUrl === t.previewUrl;
                   return (
-                    <div key={t.deezerUrl} className="flex items-center gap-3 rounded p-2 hover:bg-white/5">
+                    <div key={t.deezerUrl} className="flex items-center gap-3 rounded-sm p-2 hover:bg-white/5">
                       {t.cover ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={t.cover} alt="" className="h-10 w-10 rounded object-cover" loading="lazy" decoding="async" />
+                        <img src={t.cover} alt="" className="h-10 w-10 rounded-sm object-cover" loading="lazy" decoding="async" />
                       ) : (
-                        <div className="h-10 w-10 rounded bg-highlight" />
+                        <div className="h-10 w-10 rounded-sm bg-highlight" />
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">{t.title}</div>

@@ -143,7 +143,7 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
         <PromptModal title="Rename playlist" initial={pl.name} submitLabel="Rename" onSubmit={rename} onClose={() => setRenaming(false)} />
       )}
       {confirmingDelete && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4" onClick={() => setConfirmingDelete(false)}>
+        <div className="fixed inset-0 z-90 flex items-center justify-center bg-black/70 p-4" onClick={() => setConfirmingDelete(false)}>
           <div className="w-full max-w-sm rounded-lg bg-elevated p-5 shadow-dialog" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-2 text-lg font-bold">Delete “{pl.name}”?</h2>
             <p className="mb-4 text-sm text-subdued">This can&apos;t be undone. Your music files aren&apos;t touched.</p>
@@ -162,7 +162,7 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
         </div>
       )}
 
-      <header className="flex flex-col items-center gap-6 rounded-lg bg-gradient-to-b from-white/10 to-transparent p-6 sm:flex-row sm:items-end">
+      <header className="flex flex-col items-center gap-6 rounded-lg bg-linear-to-b from-white/10 to-transparent p-6 sm:flex-row sm:items-end">
         <PlaylistCover artIds={pl.artIds} size="lg" />
         <div className="text-center sm:text-left">
           <div className="text-sm font-medium">Playlist</div>

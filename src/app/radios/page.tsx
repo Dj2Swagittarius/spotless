@@ -82,7 +82,7 @@ export default function RadiosPage() {
     load();
   };
 
-  const input = 'w-full rounded bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued outline-none focus:shadow-insetBorder';
+  const input = 'w-full rounded-sm bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued outline-hidden focus:shadow-insetBorder';
 
   const hostOf = (url: string) => {
     try {
@@ -108,11 +108,11 @@ export default function RadiosPage() {
 
       {form && (
         <>
-          <div className="fixed inset-0 z-[90] bg-black/60" onClick={() => setForm(null)} aria-hidden />
+          <div className="fixed inset-0 z-90 bg-black/60" onClick={() => setForm(null)} aria-hidden />
           <div
             role="dialog"
             aria-label={form.id ? 'Edit station' : 'Add station'}
-            className="fixed left-1/2 top-1/2 z-[95] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-elevated p-5 shadow-dialog"
+            className="fixed left-1/2 top-1/2 z-95 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-elevated p-5 shadow-dialog"
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold">{form.id ? 'Edit station' : 'Add station'}</h2>
@@ -124,7 +124,7 @@ export default function RadiosPage() {
               <input className={input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Station name" aria-label="Station name" autoFocus />
               <input className={input} value={form.streamUrl} onChange={(e) => setForm({ ...form, streamUrl: e.target.value })} placeholder="Stream URL (http://…/stream)" aria-label="Stream URL" />
               <input className={input} value={form.homePageUrl} onChange={(e) => setForm({ ...form, homePageUrl: e.target.value })} placeholder="Homepage (optional)" aria-label="Homepage" />
-              {formError && <div className="rounded bg-negative/10 px-3 py-2 text-sm text-negative">{formError}</div>}
+              {formError && <div className="rounded-sm bg-negative/10 px-3 py-2 text-sm text-negative">{formError}</div>}
               <div className="flex justify-end gap-2 pt-1">
                 <button className="btn-pill" onClick={() => setForm(null)}>Cancel</button>
                 <button className="btn-primary" onClick={submit} disabled={!form.name.trim() || !form.streamUrl.trim()}>

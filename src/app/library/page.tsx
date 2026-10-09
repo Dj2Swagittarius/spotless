@@ -170,7 +170,7 @@ export default function LibraryPage() {
       {tab === 'playlists' && (
         <div role="tabpanel" id="library-panel-playlists" aria-labelledby="library-tab-playlists" className="space-y-2">
           <Link href="/liked" className="flex items-center gap-4 rounded-lg bg-elevated p-3 hover:bg-highlight">
-            <div className="flex h-16 w-16 items-center justify-center rounded bg-gradient-to-br from-indigo-600 to-white/80">
+            <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-linear-to-br from-indigo-600 to-white/80">
               <HeartIcon size={24} filled className="text-white" />
             </div>
             <div>
@@ -198,18 +198,18 @@ export default function LibraryPage() {
             }}
             className="flex w-full items-center gap-4 rounded-lg bg-elevated p-3 text-left hover:bg-highlight"
           >
-            <div className="flex h-16 w-16 items-center justify-center rounded bg-highlight">
+            <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-highlight">
               <PlusIcon size={24} className="text-subdued" />
             </div>
             <div className="font-bold">Create playlist</div>
           </button>
           {createError && (
-            <div role="alert" className="rounded bg-negative/10 px-3 py-2 text-sm text-negative">
+            <div role="alert" className="rounded-sm bg-negative/10 px-3 py-2 text-sm text-negative">
               {createError}
             </div>
           )}
           <button onClick={() => setImportOpen(true)} className="flex w-full items-center gap-4 rounded-lg bg-elevated p-3 text-left hover:bg-highlight">
-            <div className="flex h-16 w-16 items-center justify-center rounded bg-highlight">
+            <div className="flex h-16 w-16 items-center justify-center rounded-sm bg-highlight">
               <MusicIcon size={24} className="text-accent" />
             </div>
             <div>
@@ -244,7 +244,7 @@ export default function LibraryPage() {
                 <Link
                   key={a.id}
                   href={`/artist/${a.id}`}
-                  className="flex items-center gap-3 rounded px-2 py-1.5 hover:bg-white/10"
+                  className="flex items-center gap-3 rounded-sm px-2 py-1.5 hover:bg-white/10"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img

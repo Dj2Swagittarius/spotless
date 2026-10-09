@@ -527,7 +527,7 @@ export default function SettingsPage() {
   };
 
   const btn = 'btn-pill';
-  const input = 'w-full rounded bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued outline-none focus:shadow-insetBorder';
+  const input = 'w-full rounded-sm bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued outline-hidden focus:shadow-insetBorder';
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -583,15 +583,15 @@ export default function SettingsPage() {
         </p>
         {appCred ? (
           <div className="space-y-2 text-sm">
-            <div className="rounded bg-highlight px-3 py-2">
+            <div className="rounded-sm bg-highlight px-3 py-2">
               <span className="text-subdued">Server: </span>
               <span className="break-all">{typeof location !== 'undefined' ? location.origin : ''}</span>
             </div>
-            <div className="rounded bg-highlight px-3 py-2">
+            <div className="rounded-sm bg-highlight px-3 py-2">
               <span className="text-subdued">Username: </span>
               {appCred.username}
             </div>
-            <div className="flex items-center gap-2 rounded bg-highlight px-3 py-2">
+            <div className="flex items-center gap-2 rounded-sm bg-highlight px-3 py-2">
               <span className="text-subdued">Password: </span>
               <span className="font-mono">{credVisible ? appCred.password : '••••••••••••'}</span>
               <button
@@ -633,7 +633,7 @@ export default function SettingsPage() {
           </div>
           {scanInfo && <div className="mb-2 text-sm text-subdued">{scanInfo}</div>}
           {scanError && (
-            <div className="mb-3 rounded bg-red-950/40 px-3 py-2 text-sm text-red-300">
+            <div className="mb-3 rounded-sm bg-red-950/40 px-3 py-2 text-sm text-red-300">
               Last scan failed: {scanError}
             </div>
           )}
@@ -858,7 +858,7 @@ export default function SettingsPage() {
               <button className={btn} onClick={disconnectSpotify} disabled={spotifyBusy}>Disconnect</button>
             </div>
             {spotifyMsg && (
-              <div className={`mt-3 rounded px-3 py-2 text-sm ${spotifyMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+              <div className={`mt-3 rounded-sm px-3 py-2 text-sm ${spotifyMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
                 {spotifyMsg.text}
               </div>
             )}
@@ -900,7 +900,7 @@ export default function SettingsPage() {
                 </button>
               )}
             </div>
-            <div className="mt-2 rounded bg-base px-3 py-2 text-xs text-subdued">
+            <div className="mt-2 rounded-sm bg-base px-3 py-2 text-xs text-subdued">
               Spotify Redirect URI:{' '}
               <span className="break-all font-mono text-white">{spotifyRedirectUri}</span>
             </div>
@@ -913,7 +913,7 @@ export default function SettingsPage() {
               </p>
             )}
             {spotifyRedirectMsg && (
-              <div className={`mt-3 rounded px-3 py-2 text-sm ${spotifyRedirectMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+              <div className={`mt-3 rounded-sm px-3 py-2 text-sm ${spotifyRedirectMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
                 {spotifyRedirectMsg.text}
               </div>
             )}
@@ -937,7 +937,7 @@ export default function SettingsPage() {
                 <input className={input} value={lfmSecret} onChange={(e) => setLfmSecret(e.target.value)} type="password" placeholder="Shared secret" />
               </div>
               {lfmMsg && (
-                <div className={`mb-3 rounded px-3 py-2 text-sm ${lfmMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+                <div className={`mb-3 rounded-sm px-3 py-2 text-sm ${lfmMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
                   {lfmMsg.text}
                 </div>
               )}
@@ -990,7 +990,7 @@ export default function SettingsPage() {
             <input className={input} value={lidarrKey} onChange={(e) => setLidarrKey(e.target.value)} type="password" placeholder={lidarrConfigured ? '•••••••• (saved)' : 'API key'} />
           </div>
           {lidarrMsg && (
-            <div className={`mb-3 rounded px-3 py-2 text-sm ${lidarrMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+            <div className={`mb-3 rounded-sm px-3 py-2 text-sm ${lidarrMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
               {lidarrMsg.text}
             </div>
           )}
@@ -1018,7 +1018,7 @@ export default function SettingsPage() {
         {dupes && dupes.length > 0 && (
           <div className="max-h-80 space-y-3 overflow-y-auto">
             {dupes.map((d, i) => (
-              <div key={i} className="rounded bg-base p-3 text-sm">
+              <div key={i} className="rounded-sm bg-base p-3 text-sm">
                 <div className="font-medium">{d.artist} — {d.title}</div>
                 <div className="mt-1 text-xs text-accent">keep: {d.keep}</div>
                 {d.remove.map((p) => (
