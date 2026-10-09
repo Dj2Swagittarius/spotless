@@ -29,20 +29,47 @@ if [ "$(id -u node)" != "$PUID" ]; then
   usermod -o -u "$PUID" node
 fi
 
-# Only /data is ever chowned. /music is the user's library and must never be touched.
-if [ -d /data ]; then
-  if [ "$(stat -c '%u:%g' /data)" != "$PUID:$PGID" ]; then
-    echo "entrypoint: fixing ownership of /data for $PUID:$PGID"
+# Make an app-owned directory writable by the app user, or stop the container.
+make_writable() {
+  dir="$1"
+  if [ "$(stat -c '%u:%g' "$dir")" != "$PUID:$PGID" ]; then
+    echo "entrypoint: fixing ownership of $dir for $PUID:$PGID"
     # Best effort: CIFS without unix extensions, NFS with root_squash and read-only mounts reject
     # chown even though their mode bits may already let the app write, and `set -e` would otherwise
     # kill the container here. What matters is writability, which is checked as the app user below.
-    chown -R "$PUID:$PGID" /data 2>/dev/null \
-      || echo "entrypoint: could not change ownership of /data (network/read-only mount?); continuing" >&2
+    chown -R "$PUID:$PGID" "$dir" 2>/dev/null \
+      || echo "entrypoint: could not change ownership of $dir (network/read-only mount?); continuing" >&2
   fi
-  if ! gosu node test -w /data; then
-    echo "entrypoint: /data is not writable by uid $PUID; fix the mount permissions or set PUID/PGID" >&2
+  if ! gosu node test -w "$dir"; then
+    echo "entrypoint: $dir is not writable by uid $PUID; fix the mount permissions or set PUID/PGID" >&2
     exit 1
   fi
+}
+
+# Only /data and a separate BACKUP_DIR are ever chowned. /music is the user's library and must
+# never be touched.
+if [ -d /data ]; then
+  make_writable /data
 fi
+
+# BACKUP_DIR may point at its own mount (e.g. `./backups:/backups`), which compose creates
+# root-owned just like ./data; without this the app would fail every backup with EACCES.
+# Anything under /data is already covered above.
+case "${BACKUP_DIR:-}" in
+  '' | /data | /data/*) ;;
+  /music | /music/* | /music-write | /music-write/*)
+    echo "entrypoint: BACKUP_DIR=$BACKUP_DIR is inside the music mounts; leaving its ownership alone" >&2
+    ;;
+  *)
+    # Create it when the mount only provides the parent; a failure here surfaces below.
+    mkdir -p "$BACKUP_DIR" 2>/dev/null || true
+    if [ -d "$BACKUP_DIR" ]; then
+      make_writable "$BACKUP_DIR"
+    else
+      echo "entrypoint: BACKUP_DIR=$BACKUP_DIR does not exist and could not be created" >&2
+      exit 1
+    fi
+    ;;
+esac
 
 exec gosu node "$@"

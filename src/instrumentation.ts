@@ -1,34 +1,63 @@
+import os from 'os';
+
 // Next.js can evaluate this file more than once per process (dev HMR, multiple server
-// chunks); the flag on globalThis keeps the signal handlers from stacking up.
+// chunks); the flag on globalThis keeps the exit and signal handlers from stacking up.
 const shutdownGlobal = globalThis as typeof globalThis & { __spotlessShutdownHookedV1?: boolean };
+
+// Docker gives a container 10 s between SIGTERM and SIGKILL. A drain that is still waiting on a
+// long-lived stream by then must give up a little earlier, so the WAL checkpoint below still runs.
+const SHUTDOWN_DEADLINE_MS = 8_000;
+
+/** Conventional exit code for a process that ended because of `signal`: 128 + signal number. */
+function signalExitCode(signal: NodeJS.Signals): number {
+  return 128 + os.constants.signals[signal];
+}
 
 async function registerGracefulShutdown(): Promise<void> {
   if (shutdownGlobal.__spotlessShutdownHookedV1) return;
   shutdownGlobal.__spotlessShutdownHookedV1 = true;
 
   const { log } = await import('./lib/log');
-  // Importing the module does not open the database; getDb() is only called on shutdown.
+  // Importing the module does not open the database; getDb() is only called on exit.
   const { getDb } = await import('./lib/db');
-  let shuttingDown = false;
 
-  const shutdown = (signal: NodeJS.Signals) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    log.info(`received ${signal}, shutting down`);
+  // Runs synchronously on every process.exit(), whoever calls it, so it cannot cut a request
+  // short. Folding the WAL back into library.db leaves a stopped container with a single clean
+  // file (backups and restores copy only library.db). better-sqlite3 is synchronous, so no
+  // statement or transaction can be mid-flight by the time this runs.
+  process.once('exit', () => {
     try {
-      // Fold the WAL back into library.db so a stopped container leaves a single clean file
-      // (backups and restores copy only library.db). Any failure here must not block exit.
       const db = getDb();
       db.pragma('wal_checkpoint(TRUNCATE)');
       db.close();
     } catch {
       // nothing left to do: the process is exiting either way
     }
-    process.exit(0);
+  });
+
+  let shuttingDown = false;
+  const onSignal = (signal: NodeJS.Signals) => {
+    // Interactive shells send SIGINT to every child, so the same signal can arrive twice.
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info(`received ${signal}, shutting down`);
+    if (process.listenerCount(signal) <= 1) {
+      // Nobody else handles this signal (NEXT_MANUAL_SIG_HANDLE, a custom server): having a
+      // listener at all cancels Node's default termination, so exit here with the usual code.
+      process.exit(signalExitCode(signal));
+    }
+    // Next's start-server registered its own handler before loading this file: it stops
+    // accepting connections, finishes in-flight requests, closes the Next server and exits with
+    // 128 + signal. Pre-empting it would cut active streams, so this only backs it up with a
+    // deadline, unref'd so it never keeps an otherwise finished process alive.
+    setTimeout(() => {
+      log.warn(`shutdown did not finish within ${SHUTDOWN_DEADLINE_MS} ms, exiting`);
+      process.exit(signalExitCode(signal));
+    }, SHUTDOWN_DEADLINE_MS).unref();
   };
 
-  process.once('SIGTERM', shutdown);
-  process.once('SIGINT', shutdown);
+  process.on('SIGTERM', onSignal);
+  process.on('SIGINT', onSignal);
 }
 
 export async function register() {

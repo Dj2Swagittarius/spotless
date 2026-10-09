@@ -260,7 +260,7 @@ docker compose pull && docker compose up -d
 On first start the container runs as root just long enough to make the bind-mounted `./data` folder writable
 (Docker creates it root-owned), then drops to an unprivileged user. Set `PUID` / `PGID` in the `environment:`
 block to the uid/gid that should own `./data` (the defaults are `1000` / `1000`; `id -u` and `id -g` print yours).
-Only `/data` is ever chowned; your music mount is never touched.
+Only `/data` (and `BACKUP_DIR`, when it points at a separate mount) is ever chowned; your music mount is never touched.
 
 The image includes a `HEALTHCHECK` against `GET /api/health`, which returns `200 { "ok": true }` while the
 database is reachable and `503` otherwise, so `docker ps` and orchestrators can see when Spotless is actually up.
@@ -276,21 +276,22 @@ database is reachable and `503` otherwise, so `docker ps` and orchestrators can 
 | `SPOTIFY_CLIENT_ID` | *(none)* | Optional; enables the Spotify taste/playlist import |
 | `SPOTIFY_REDIRECT_URI` | `http://127.0.0.1:3000/api/spotify/callback` | Optional deployment default for Spotify OAuth; Settings → Spotify overrides it |
 | `FFMPEG_PATH` | `ffmpeg` | Path to ffmpeg (bundled in the Docker image) |
+| `GIT_SHA` | *(set by CI)* | Build time only: commit shown in Settings → About and `/api/health`. Docker builds pass it as a build arg; a local `npm run build` reads it from git |
 | `TRANSCODE_MAX_ACTIVE` | number of CPU cores | Maximum concurrent ffmpeg transcodes; once reached, extra listeners get the raw file instead of a transcode (or `503` when they asked to start mid-track) |
 | `ALLOW_PRIVATE_STREAM_URLS` | *(off)* | Set to `1` to let internet radio stations point at loopback, LAN (RFC 1918) or link-local IP addresses, e.g. an Icecast box on `192.168.x.x`. Off by default so the station proxy cannot be used to read other services on your network; stations addressed by hostname are unaffected |
-| `LIDARR_WEBHOOK_SECRET` | *(none)* | Optional; if set, the Lidarr webhook requires `?token=<secret>` |
+| `LIDARR_WEBHOOK_SECRET` | *(none)* | Optional; if set, the Lidarr webhook requires the secret in an `X-Webhook-Token` header (or, less safely, as `?token=<secret>` in the URL) |
 | `AUTH_SECURE_COOKIE` | *(auto)* | Force the web session cookie to `Secure`; use `true` behind HTTPS if proxy detection is unavailable |
 | `OLLAMA_URL` / `LMSTUDIO_URL` | `http://localhost:11434` / `http://localhost:1234/v1` | AI DJ: default local LLM server URLs |
 | `TTS_URL` / `STT_URL` | `http://localhost:8880/v1` / `http://localhost:8000/v1` | AI DJ: default local voice and speech recognition servers |
 | `DJ_MODEL` | *(none)* | AI DJ: default model id |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `ELEVENLABS_API_KEY` | *(none)* | AI DJ: optional keys for hosted providers (keys saved in Settings take priority) |
 | `AUTH_MIN_PASSWORD_LENGTH` | `4` | Minimum web password length. `4` allows a PIN on a home network; raise it (e.g. `12`) if Spotless is reachable from the internet |
-| `TRUST_PROXY` | *(off)* | Number of reverse-proxy hops in front of Spotless (usually `1`). Lets login throttling read the client IP from `X-Forwarded-For`; leave unset when clients connect directly, because the header can be forged |
-| `DJ_PROVIDER` | `ollama` | AI DJ: default LLM provider id (Settings → AI DJ overrides it) |
-| `BACKUP_DIR` | `DATA_DIR/backups` | Where the daily database backups are written |
+| `TRUST_PROXY` | *(off)* | Number of reverse-proxy hops in front of Spotless (usually `1`). Lets login throttling read the client IP from `X-Forwarded-For`, and lets the Spotify / Last.fm OAuth callback URLs be built from `X-Forwarded-Host` / `X-Forwarded-Proto` (set it when your proxy rewrites the `Host` header, e.g. nginx `proxy_set_header Host $proxy_host`). Leave unset when clients connect directly, because the headers can be forged |
+| `DJ_PROVIDER` | `lmstudio` | AI DJ: default LLM provider id (`lmstudio`, `ollama`, `custom`, `openai`, `anthropic`, `gemini`, `mistral`, `deepseek`, `xai`, `groq` or `openrouter`; unknown values fall back to `lmstudio`). Settings → AI DJ overrides it |
+| `BACKUP_DIR` | `DATA_DIR/backups` | Where the daily database backups are written. In Docker it may be its own mount (e.g. `./backups:/backups`); the entrypoint makes it writable by `PUID`/`PGID` the same way as `/data` |
 | `LOG_LEVEL` | `info` | Server log verbosity: `debug`, `info`, `warn` or `error` |
 | `HOSTNAME` | `0.0.0.0` | Bind address of the production server |
-| `PUID` / `PGID` | `1000` / `1000` | Docker only: uid/gid that owns `/data` and runs the app (see *Run the prebuilt image*) |
+| `PUID` / `PGID` | `1000` / `1000` | Docker only: uid/gid that owns `/data` (and a separate `BACKUP_DIR`) and runs the app (see *Run the prebuilt image*) |
 
 Automatic library refresh is configured inside **Settings → Music library** and is stored
 in `DATA_DIR/library.db`; no environment variable is required. The default is **Off**.
@@ -313,7 +314,9 @@ files there, the Settings page will report a lyrics write error and your music f
 Lidarr is configured in the app (Settings → Lidarr: URL + API key). To get automatic
 rescans after Lidarr imports, add a webhook in Lidarr → Settings → Connect →
 Webhook pointing at `http://<spotless-host>:3000/api/lidarr/webhook`. If you set
-`LIDARR_WEBHOOK_SECRET`, append `?token=<secret>` to that URL — otherwise the webhook is
+`LIDARR_WEBHOOK_SECRET`, add a request header `X-Webhook-Token: <secret>` in Lidarr's webhook
+settings (newer Lidarr versions have a Headers field); appending `?token=<secret>` to the URL
+also works but leaves the secret in proxy and access logs. Without a secret the webhook is
 unauthenticated. Keep that endpoint restricted to a trusted network or set a webhook secret.
 
 ### Web authentication and profile management
@@ -560,14 +563,16 @@ Open **Settings → AI DJ** as the admin profile. Everything defaults to servers
 
 When Spotless runs in Docker, `localhost` is the container itself: use `http://host.docker.internal:PORT` (the supplied `docker-compose.yml` maps it to the host).
 
-The DJ only plays songs it can match to your library. Picks it can't match are shown as suggestions only when Deezer confirms the song exists. Each profile's chat history is kept in that browser only.
+The DJ only plays songs it can match to your library. Picks it can't match are shown as suggestions after a Deezer lookup: a song Deezer does not know under that artist is dropped as made up, and the DJ is asked once for replacements. If Deezer cannot be reached, songs the DJ explicitly suggested are still shown (unverified, without a preview) while unmatched play picks are not. Each profile's chat history is kept in that browser only.
 
 ## Backup and restore
 
 Spotless copies the SQLite database to `DATA_DIR/backups/library-YYYY-MM-DD.db` (or `BACKUP_DIR` if set) on
 startup and once every 24 hours, keeping the last 7. Each copy is written to a temporary file, integrity-checked
 with `PRAGMA quick_check`, and only then renamed into place, so a half-written backup never replaces a good one.
-With the default compose file that is `./data/backups` on the host.
+With the default compose file that is `./data/backups` on the host. To keep backups on another disk, mount it and
+point `BACKUP_DIR` at it (for example `- ./backups:/backups` under `volumes:` and `BACKUP_DIR=/backups` under
+`environment:`); the entrypoint makes that mount writable by `PUID`/`PGID` just like `/data`.
 
 To restore:
 
@@ -597,8 +602,9 @@ npm run dev
 | `npm run format:check` | Prettier |
 | `npm run build` | Production build |
 
-CI runs all of these on every pull request. `GET /api/health` is handy while developing: it answers `200` once
-the server and database are up.
+CI runs typecheck, lint, the unit tests and the production build on every pull request; `format:check` is not
+enforced yet because a repo-wide format has never been run (see CONTRIBUTING.md). `GET /api/health` is handy
+while developing: it answers `200` once the server and database are up.
 
 ## Security model — read this
 
@@ -640,7 +646,7 @@ Do not publicly expose Spotless over plain HTTP.
 
 - `/api/lidarr/webhook` remains callable by Lidarr without a browser session. If it is reachable outside a trusted network, configure `LIDARR_WEBHOOK_SECRET`.
 
-- Nightly DB backups are kept in `DATA_DIR/backups` (last 7); protect those backups with the same care as the live database.
+- Nightly DB backups are kept in `DATA_DIR/backups` (or `BACKUP_DIR`; last 7); protect those backups with the same care as the live database.
 
 - Normal Spotless scanning/streaming access stays read-only at `/music`. If automatic synced sidecars are enabled, the optional `/music-write` mount allows Spotless to create new `.lrc` files only; existing lyric files are not overwritten.
 
