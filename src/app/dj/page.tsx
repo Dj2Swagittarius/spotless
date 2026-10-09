@@ -16,12 +16,22 @@ interface Suggestion {
   deezerUrl: string | null;
 }
 
+interface ProposedPlaylist {
+  name: string;
+  description: string;
+  tracks: Track[];
+  missing: { title: string; artist: string }[];
+}
+
 interface Msg {
   role: 'user' | 'assistant';
   content: string;
   play?: Track[];
   queue?: Track[];
+  /** a playlist saved from this reply (after the listener confirmed the proposal) */
   playlist?: { id: number; name: string; added: number; missing: number };
+  /** a playlist the DJ put together; saved only when the listener says so */
+  proposed?: ProposedPlaylist;
   suggestions?: Suggestion[];
   /** playlists the listener saved from this reply's track cards, keyed by card */
   saved?: Partial<Record<'play' | 'queue', SavedPlaylist>>;
@@ -71,6 +81,9 @@ export default function DjPage() {
   const [speakingNow, setSpeakingNow] = useState<string | null>(null);
   const previewRef = useRef<HTMLAudioElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // the recorder's onstop runs after navigation too; it must not send or set state on a gone page
+  const mountedRef = useRef(true);
   const endRef = useRef<HTMLDivElement | null>(null);
   const playDj = usePlayer((s) => s.playDj);
   const appendTracks = usePlayer((s) => s.appendTracks);
@@ -96,10 +109,21 @@ export default function DjPage() {
         }
       })
       .catch(() => {});
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       unsubscribe();
       previewRef.current?.pause();
       stopSpeaking();
+      // leaving mid-recording: release the microphone now rather than when the 30 s timer fires
+      if (recordTimerRef.current) clearTimeout(recordTimerRef.current);
+      recordTimerRef.current = null;
+      const rec = recorderRef.current;
+      recorderRef.current = null;
+      if (rec) {
+        if (rec.state !== 'inactive') rec.stop();
+        rec.stream.getTracks().forEach((t) => t.stop());
+      }
     };
   }, []);
 
@@ -142,7 +166,15 @@ export default function DjPage() {
           setMessages((m) => [...m, { role: 'assistant', content: d.error ?? 'The DJ could not answer.', error: true }]);
           return;
         }
-        const reply: Msg = { role: 'assistant', content: d.say, play: d.play, queue: d.queue, playlist: d.playlist, suggestions: d.suggestions };
+        const reply: Msg = {
+          role: 'assistant',
+          content: d.say,
+          play: d.play,
+          queue: d.queue,
+          playlist: d.playlist,
+          proposed: d.proposedPlaylist,
+          suggestions: d.suggestions,
+        };
         setMessages((m) => [...m, reply]);
         if (d.play?.length) playDj(d.play);
         if (d.queue?.length) appendTracks(d.queue);
@@ -174,6 +206,10 @@ export default function DjPage() {
       rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (recordTimerRef.current) clearTimeout(recordTimerRef.current);
+        recordTimerRef.current = null;
+        if (recorderRef.current === rec) recorderRef.current = null;
+        if (!mountedRef.current) return;
         setRecording(false);
         const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
         if (blob.size < 1000) return;
@@ -183,12 +219,13 @@ export default function DjPage() {
         try {
           const res = await fetch('/api/dj/transcribe', { method: 'POST', body: form });
           const d = await res.json();
+          if (!mountedRef.current) return;
           if (!res.ok) setMicError(d.error ?? 'Could not understand the recording.');
           else if (d.text) send(d.text);
         } catch {
-          setMicError('Could not reach the server.');
+          if (mountedRef.current) setMicError('Could not reach the server.');
         } finally {
-          setTranscribing(false);
+          if (mountedRef.current) setTranscribing(false);
         }
       };
       recorderRef.current = rec;
@@ -196,7 +233,7 @@ export default function DjPage() {
       rec.start();
       setRecording(true);
       // safety stop so a forgotten mic doesn't record forever
-      setTimeout(() => rec.state === 'recording' && rec.stop(), 30_000);
+      recordTimerRef.current = setTimeout(() => rec.state === 'recording' && rec.stop(), 30_000);
     } catch {
       setMicError('Microphone access was blocked.');
     }
@@ -219,14 +256,22 @@ export default function DjPage() {
   const getIt = async (s: Suggestion) => {
     const k = `${s.artist}|${s.title}`;
     setGot((g) => ({ ...g, [k]: 'busy' }));
-    const res = await fetch('/api/lidarr/add', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ artist: s.artist }),
-    });
-    const d = await res.json().catch(() => ({}));
-    setGot((g) => ({ ...g, [k]: res.ok ? (d.status === 'requested' ? 'Requested' : 'Added to Lidarr') : `Failed: ${d.error ?? res.status}` }));
+    try {
+      const res = await fetch('/api/lidarr/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist: s.artist }),
+      });
+      const d = await res.json().catch(() => ({}));
+      setGot((g) => ({ ...g, [k]: res.ok ? (d.status === 'requested' ? 'Requested' : 'Added to Lidarr') : `Failed: ${d.error ?? res.status}` }));
+    } catch {
+      // a network error must not leave the button stuck on "Adding…"
+      setGot((g) => ({ ...g, [k]: 'Failed: could not reach the server' }));
+    }
   };
+
+  const setProposalResult = (i: number, playlist: Msg['playlist']) =>
+    setMessages((ms) => ms.map((m, j) => (j === i ? { ...m, playlist, proposed: undefined } : m)));
 
   const markSaved = (i: number, card: 'play' | 'queue', pl: SavedPlaylist) =>
     setMessages((ms) => ms.map((m, j) => (j === i ? { ...m, saved: { ...m.saved, [card]: pl } } : m)));
@@ -358,6 +403,13 @@ export default function DjPage() {
                   onSaved={(pl) => markSaved(i, 'queue', pl)}
                 />
               )}
+              {m.proposed && !m.playlist && (
+                <ProposedPlaylistCard
+                  proposed={m.proposed}
+                  onSaved={(pl) => setProposalResult(i, pl)}
+                  onDismiss={() => setProposalResult(i, undefined)}
+                />
+              )}
               {m.playlist && (
                 <Link href={`/playlist/${m.playlist.id}`} className="block max-w-[90%] rounded-lg bg-highlight px-4 py-3 text-sm hover:bg-press">
                   <div className="font-bold">New playlist: {m.playlist.name}</div>
@@ -479,6 +531,109 @@ export default function DjPage() {
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+/** A playlist the DJ proposed: nothing is saved until the listener confirms it here. */
+function ProposedPlaylistCard({
+  proposed,
+  onSaved,
+  onDismiss,
+}: {
+  proposed: ProposedPlaylist;
+  onSaved: (pl: { id: number; name: string; added: number; missing: number }) => void;
+  onDismiss: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(proposed.name);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const shown = open ? proposed.tracks : proposed.tracks.slice(0, 5);
+
+  const save = async () => {
+    const n = name.trim();
+    if (!n || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/dj/playlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: n,
+          description: proposed.description,
+          trackIds: proposed.tracks.map((t) => t.id),
+          missing: proposed.missing,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.id) throw new Error(d.error ?? 'save failed');
+      window.dispatchEvent(new Event('playlists-changed')); // sidebar refreshes its list
+      onSaved({ id: d.id, name: d.name ?? n, added: d.added ?? 0, missing: d.missing ?? 0 });
+    } catch (err) {
+      setError(err instanceof Error && err.message !== 'save failed' ? err.message : 'Could not save the playlist.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="max-w-[90%] rounded-lg bg-highlight p-3">
+      <div className="mb-1 text-sm font-bold">Proposed playlist</div>
+      <div className="mb-2 text-xs text-subdued">
+        {proposed.tracks.length} song{proposed.tracks.length === 1 ? '' : 's'} from your library
+        {proposed.missing.length ? ` · ${proposed.missing.length} you don’t have yet (kept as placeholders)` : ''}
+      </div>
+      <form
+        className="mb-2 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={100}
+          placeholder="Playlist name"
+          aria-label="Playlist name"
+          className="min-w-0 flex-1 rounded bg-press px-2 py-1 text-xs text-white outline-none focus:shadow-insetBorder"
+        />
+        <button type="submit" disabled={saving || !name.trim()} className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-black disabled:opacity-40">
+          {saving ? 'Saving…' : 'Save playlist'}
+        </button>
+        <button type="button" onClick={onDismiss} disabled={saving} className="text-xs text-subdued hover:text-white">
+          No thanks
+        </button>
+      </form>
+      {error && <div className="mb-2 text-xs text-negative">{error}</div>}
+      <ol className="space-y-1">
+        {shown.map((t, i) => (
+          <li key={`${t.id}-${i}`} className="flex items-center gap-2 text-xs">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`/api/artwork/${t.albumId}`} alt="" className="h-8 w-8 rounded object-cover" loading="lazy" />
+            <div className="min-w-0">
+              <div className="truncate font-semibold">{t.title}</div>
+              <div className="truncate text-subdued">{t.artist}</div>
+            </div>
+          </li>
+        ))}
+        {(open ? proposed.missing : proposed.missing.slice(0, Math.max(0, 5 - shown.length))).map((s, i) => (
+          <li key={`m-${i}`} className="flex items-center gap-2 text-xs text-subdued">
+            <div className="flex h-8 w-8 items-center justify-center rounded bg-press">?</div>
+            <div className="min-w-0">
+              <div className="truncate font-semibold">{s.title}</div>
+              <div className="truncate">{s.artist} · not in your library</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {proposed.tracks.length + proposed.missing.length > 5 && (
+        <button className="mt-2 text-xs text-subdued hover:text-white" onClick={() => setOpen(!open)}>
+          {open ? 'Show less' : `Show all ${proposed.tracks.length + proposed.missing.length}`}
+        </button>
+      )}
     </div>
   );
 }

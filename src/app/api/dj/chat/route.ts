@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUserFrom } from '@/lib/user';
 import { runDj } from '@/lib/dj/dj';
-import { LlmError, type ChatMessage } from '@/lib/dj/llm';
+import { djErrorResponse, djRateLimit } from '@/lib/dj/guard';
+import type { ChatMessage } from '@/lib/dj/llm';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -17,6 +18,9 @@ const song = (v: unknown) => {
 export async function POST(req: NextRequest) {
   const user = currentUserFrom(req);
   if (!user) return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+  // one message costs up to two model calls and a batch of Deezer lookups
+  const limited = djRateLimit('chat', user.id);
+  if (limited) return limited;
   const body = await req.json().catch(() => ({}));
   const messages: ChatMessage[] = (Array.isArray(body.messages) ? body.messages : [])
     .filter((m: { role?: unknown; content?: unknown }) => (m?.role === 'user' || m?.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
@@ -35,7 +39,6 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json(reply);
   } catch (err) {
-    const msg = err instanceof LlmError ? err.message : `DJ failed: ${String(err).slice(0, 300)}`;
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return djErrorResponse(req, err, 'chat');
   }
 }
