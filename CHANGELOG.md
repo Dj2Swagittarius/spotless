@@ -5,6 +5,8 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-09
+
 - Desktop app for Windows, macOS and Linux (`desktop/`, Electron). A native window around your Spotless server, for
   people who would rather not keep a browser tab open: first launch asks for the server address or scans the local
   network for one, then remembers it and the window position. Media keys and the OS media overlay work through the
