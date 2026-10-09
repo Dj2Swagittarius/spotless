@@ -186,6 +186,29 @@ To stay on a release line, change the `image:` line in `docker-compose.yml`. Upd
 `docker compose pull && docker compose up -d`. Read the changelog before moving to a new minor version:
 entries marked **Breaking** may need a config change.
 
+## Desktop app
+
+Prefer a window of its own over a browser tab? Each [release](https://github.com/Dj2Swagittarius/spotless/releases)
+has installers for a small desktop app that connects to your Spotless server:
+
+| System | File |
+| --- | --- |
+| Windows 10/11 | `Spotless-Setup-X.Y.Z.exe` |
+| macOS (Intel and Apple Silicon) | `Spotless-X.Y.Z-mac-universal.dmg` |
+| Linux | `Spotless-X.Y.Z-linux-x86_64.AppImage` or `.deb` |
+
+On first launch, enter the address you use in the browser (for example `http://192.168.1.10:3000`) or press
+**Scan network**, which looks for Spotless on this computer and your local network (ports 3000, 4000, 8080 and 80).
+The app remembers the server; **Alt** shows the menu on Windows/Linux, where **Spotless → Change server…** switches
+to another one. It is the same web player, so every feature and theme works, plus media keys and the system media
+controls.
+
+The installers are not code-signed yet. Windows SmartScreen asks once (**More info → Run anyway**); on macOS open the
+app, then allow it under **System Settings → Privacy & Security → Open Anyway**.
+
+To run or build it from source: `cd desktop && npm ci && npm start` (or `npx electron-builder` for an installer for
+the current system, written to `desktop/dist/`).
+
 ## Configuration
 
 | Env var | Default | Purpose |
@@ -403,8 +426,8 @@ npm run release -- patch
 ```
 
 That bumps `package.json`, dates the changelog section, commits `Release vX.Y.Z` and tags it (`--dry-run`
-previews). Push with `git push origin main --follow-tags`; CI publishes the `:X.Y.Z` / `:X.Y` image tags
-and creates the GitHub Release from the changelog section.
+previews). Push with `git push origin main --follow-tags`; CI publishes the `:X.Y.Z` / `:X.Y` image tags,
+builds the desktop installers and creates the GitHub Release from the changelog section with the installers attached.
 
 ## Security model — read this
 

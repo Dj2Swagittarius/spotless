@@ -3,8 +3,22 @@ import nextVitals from 'eslint-config-next/core-web-vitals';
 import nextTs from 'eslint-config-next/typescript';
 
 export default defineConfig([
-  // Build output, dependencies, runtime data and non-source folders are never linted.
-  globalIgnores(['.next/**', '.claude/**', 'test-env/**', 'node_modules/**', 'data/**', 'docs/**', 'public/**', 'dj-test/**', 'next-env.d.ts']),
+  // Build output, dependencies, runtime data and non-source folders are never linted. The desktop
+  // preload is CommonJS (Electron's sandbox requires it), which the Next.js configs do not cover.
+  globalIgnores([
+    '.next/**',
+    '.claude/**',
+    'test-env/**',
+    'node_modules/**',
+    'data/**',
+    'docs/**',
+    'public/**',
+    'dj-test/**',
+    'desktop/dist/**',
+    'desktop/node_modules/**',
+    'desktop/*.cjs',
+    'next-env.d.ts',
+  ]),
   ...nextVitals,
   ...nextTs,
   {
