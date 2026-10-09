@@ -1,18 +1,11 @@
-import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { requestOrigin, secureCookieFor } from '@/lib/auth';
+import { requestOrigin, safeEqual, secureCookieFor } from '@/lib/auth';
 import { getLastfmSession, saveLastfmSession } from '@/lib/lastfm';
 import { userIdFrom } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
 
 const STATE_COOKIE = 'lastfm_oauth_state';
-
-function stateMatches(presented: string, expected: string): boolean {
-  const a = Buffer.from(presented);
-  const b = Buffer.from(expected);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
 
 /** The state cookie is single-use: drop it on every exit from the callback. */
 function clearState(res: NextResponse, req: NextRequest): NextResponse {
@@ -33,7 +26,7 @@ export async function GET(req: NextRequest) {
   const origin = requestOrigin(req);
   const state = req.nextUrl.searchParams.get('state');
   const cookieState = req.cookies.get(STATE_COOKIE)?.value;
-  if (!state || !cookieState || !stateMatches(state, cookieState)) {
+  if (!state || !cookieState || !safeEqual(state, cookieState)) {
     // Not this browser's login attempt (or it expired): refuse to link rather than redirecting,
     // so a forged callback can't quietly bind someone else's Last.fm session to this profile.
     return clearState(

@@ -238,7 +238,7 @@ describe('subsonic POST form body', () => {
 
   it('refuses a declared Content-Length over the cap before authenticating', async () => {
     const route: RestRoute = await import('@/app/rest/[...view]/route');
-    const req = formPost('ping.view', 'u=nobody', { 'content-length': String(65 * 1024) });
+    const req = formPost('ping.view', 'u=nobody', { 'content-length': String(1025 * 1024) });
     const res = await callRoute(route, req, 'ping.view');
     expect(res.status).toBe(413);
     const body = (await res.json())['subsonic-response'];
@@ -249,7 +249,7 @@ describe('subsonic POST form body', () => {
   it('stops reading an undeclared (streamed) body once it passes the cap', async () => {
     const route: RestRoute = await import('@/app/rest/[...view]/route');
     // valid credentials inside an oversized body must not help: the body is refused unread
-    const body = `u=${username}&p=${appPassword}&pad=${'x'.repeat(65 * 1024)}`;
+    const body = `u=${username}&p=${appPassword}&pad=${'x'.repeat(1025 * 1024)}`;
     const res = await callRoute(route, formPost('ping.view', body), 'ping.view');
     expect(res.status).toBe(413);
     expect((await res.json())['subsonic-response'].error.code).toBe(0);
@@ -260,7 +260,7 @@ describe('subsonic POST form body', () => {
     const req = new NextRequest(restUrl('ping.view', { u: username, p: appPassword, f: 'json' }), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pad: 'x'.repeat(65 * 1024) }),
+      body: JSON.stringify({ pad: 'x'.repeat(1025 * 1024) }),
     });
     const res = await callRoute(route, req, 'ping.view');
     expect(res.status).toBe(200);

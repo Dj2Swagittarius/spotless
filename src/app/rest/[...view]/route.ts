@@ -51,7 +51,8 @@ const OPEN_SUBSONIC_EXTENSIONS = [
 
 // Subsonic form bodies are a handful of short fields. The body is read before authentication
 // (clients may send u/p in it), so cap it instead of buffering whatever an anonymous client posts.
-const MAX_FORM_BYTES = 64 * 1024;
+// 1 MiB: createPlaylist/updatePlaylist legitimately POST thousands of songId values
+const MAX_FORM_BYTES = 1024 * 1024;
 
 // scrobble `time` is milliseconds since 1970 (Subsonic spec). A client that sends seconds lands in
 // January 1970, so anything before 2000-01-01 is treated as "no usable time" rather than stored.

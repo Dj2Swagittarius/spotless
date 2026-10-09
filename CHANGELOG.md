@@ -9,7 +9,7 @@ All notable changes to Spotless are listed here. The format follows
 - Streaming: byte-range handling follows RFC 9110 more closely — an inverted range (bytes=500-100) is ignored rather than answered 416, and If-Range only honours an exact Last-Modified or a strong ETag.
 - Artwork: a cover or artist image removed by the scanner between the existence check and the read now falls back to the placeholder instead of a 500.
 - Streaming: a transcode request with a start offset answers 503 instead of the raw file from the beginning when ffmpeg is not installed.
-- Subsonic API: POST form bodies larger than 64 KiB are rejected (HTTP 413, error 0) before authentication; non-form bodies are never read
+- Subsonic API: POST form bodies larger than 1 MiB are rejected (HTTP 413, error 0) before authentication; non-form bodies are never read
 - Subsonic API: invalid paging offsets (fractional, huge or non-numeric) are treated as 0 instead of failing the request; LIMIT/OFFSET are now bound parameters
 - Subsonic API: a missing required id/playlistId now returns error 10 (missing parameter) instead of 70 (not found)
 - Subsonic API: scrobble times before 2000-01-01 (e.g. seconds instead of milliseconds) fall back to the current time for history and Last.fm
@@ -43,7 +43,7 @@ All notable changes to Spotless are listed here. The format follows
 - Spotify: connecting now succeeds even when the first taste import fails (e.g. rate limit or dev-mode allowlist); the callback redirects with spotify=connected&spotify_warning=... instead of reporting a failed connection, and Re-import in Settings retries the import.
 - Spotify: a 401 from the Spotify Web API now disconnects the profile (drops the stored tokens) so Settings offers Connect again instead of showing Connected while every import fails.
 - Radio: a fractional ?limit (e.g. 1.5) no longer causes a 500; it is floored to an integer before the query.
-- Security: the CSRF origin check now honours X-Forwarded-Host only when TRUST_PROXY is set, matching how OAuth callback URLs are built. Deployments behind a reverse proxy that rewrites the Host header must set TRUST_PROXY (usually 1) for browser POST/PUT/DELETE requests to pass the check.
+- Security: the CSRF origin check matches a browser Origin against the Host header or X-Forwarded-Host, so reverse proxies that rewrite Host keep working; building OAuth callback URLs from X-Forwarded-* still requires TRUST_PROXY.
 - Fonts are self-hosted (Figtree, Bricolage Grotesque; OFL) so builds no longer download from Google Fonts.
 
 ## [0.2.0] - 2026-10-08

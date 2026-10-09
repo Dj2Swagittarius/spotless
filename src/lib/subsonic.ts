@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import type { NextRequest } from 'next/server';
+import { safeEqual } from './auth';
 import { getDb } from './db';
 import { getMusicDir } from './scanner';
 import { APP_VERSION } from './version';
@@ -39,14 +40,6 @@ export function regenerateAppPassword(userId: number): string {
   const pw = crypto.randomBytes(9).toString('base64url');
   getDb().prepare('UPDATE users SET app_password = ? WHERE id = ?').run(pw, userId);
   return pw;
-}
-
-/** Constant-time string compare; false on length mismatch (avoids leaking length via throw). */
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
 }
 
 /**

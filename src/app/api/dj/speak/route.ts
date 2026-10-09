@@ -18,9 +18,9 @@ export async function POST(req: NextRequest) {
   const limited = djRateLimit('speak', user.id);
   if (limited) return limited;
   const body = await req.json().catch(() => ({}));
-  const text = String(body.text ?? '').trim();
+  // over-long lines are spoken truncated rather than refused: the model occasionally runs long
+  const text = String(body.text ?? '').trim().slice(0, MAX_CHARS);
   if (!text) return NextResponse.json({ error: 'text required' }, { status: 400 });
-  if (text.length > MAX_CHARS) return NextResponse.json({ error: 'text too long' }, { status: 413 });
   const cfg = getDjConfig();
   try {
     const out = await synthesize(cfg, text);

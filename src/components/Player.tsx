@@ -162,7 +162,12 @@ export default function Player() {
   const els = () => [audioARef.current, audioBRef.current] as const;
 
   /** Element volume for a track: the user's setting, DJ ducking and ReplayGain, capped at 1. */
-  const levelFor = (gain?: number | null) => Math.min(1, volume * duck * gainMult(gain));
+  // Reads the store directly so deferred callers (the start-stall timer, fade ticks) never apply a
+  // volume or duck captured by the render that created them.
+  const levelFor = (gain?: number | null) => {
+    const live = usePlayer.getState();
+    return Math.min(1, live.volume * live.duck * gainMult(gain));
+  };
 
   // restore the saved session once we are on the client (see skipHydration in the store):
   // the queue comes back paused at the saved index, nothing starts playing by itself.

@@ -51,6 +51,22 @@ async function derive(password: string, salt: Buffer, keylen: number, N: number,
   }
 }
 
+/**
+ * Constant-time comparison of two secrets (webhook tokens, OAuth state, app passwords) as
+ * UTF-8 bytes. crypto.timingSafeEqual throws on unequal lengths, so a length mismatch compares
+ * `a` against itself before returning false: the call then costs one comparison either way and a
+ * timing probe learns at most the secret's length, never its content.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ab.length !== bb.length) {
+    crypto.timingSafeEqual(ab, ab);
+    return false;
+  }
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 export interface AuthSession {
   userId: number;
   tokenHash: string;
@@ -208,6 +224,23 @@ export function expectedHost(req: NextRequest): string {
     if (forwardedHost && HOST_PATTERN.test(forwardedHost)) host = forwardedHost;
   }
   return host;
+}
+
+/**
+ * Hosts a browser's Origin may legitimately name for a same-origin request: the host the app
+ * saw (expectedHost) and, when present, the first X-Forwarded-Host. The forwarded value is
+ * accepted here even without TRUST_PROXY because this only feeds the CSRF origin comparison: a
+ * cross-site page cannot attach X-Forwarded-Host to a request without a CORS preflight, which
+ * this app never grants, so a forged value gains an attacker nothing, while rejecting it would
+ * break every browser write behind a reverse proxy that rewrites Host (Apache default, nginx
+ * without proxy_set_header Host). Building absolute URLs still goes through requestOrigin,
+ * which keeps requiring TRUST_PROXY.
+ */
+export function originHosts(req: NextRequest): string[] {
+  const hosts = [expectedHost(req)];
+  const forwardedHost = firstForwarded(req, 'x-forwarded-host');
+  if (forwardedHost && HOST_PATTERN.test(forwardedHost) && !hosts.includes(forwardedHost)) hosts.push(forwardedHost);
+  return hosts;
 }
 
 /**

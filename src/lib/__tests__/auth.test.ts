@@ -68,12 +68,17 @@ describe('proxy CSRF origin check', () => {
     return (await import('@/proxy')).proxy;
   }
 
-  it('matches Origin against the Host header, not a client-supplied X-Forwarded-Host, without TRUST_PROXY', async () => {
+  it('accepts an Origin matching either Host or X-Forwarded-Host without TRUST_PROXY (Host-rewriting proxies)', async () => {
     const proxy = await loadProxy({ TRUST_PROXY: undefined });
-    const forged = proxy(
-      reqWithHosts({ host: '127.0.0.1:3000', origin: 'http://evil.example', 'x-forwarded-host': 'evil.example' }, 'POST')
+    // a browser cannot attach X-Forwarded-Host cross-site without a CORS preflight, so matching it is safe
+    const rewritingProxy = proxy(
+      reqWithHosts({ host: 'upstream:3000', origin: 'https://music.example.com', 'x-forwarded-host': 'music.example.com' }, 'POST')
     );
-    expect(forged.status).toBe(403);
+    expect(rewritingProxy.status).toBe(200);
+    const crossSite = proxy(
+      reqWithHosts({ host: 'upstream:3000', origin: 'https://evil.example', 'x-forwarded-host': 'music.example.com' }, 'POST')
+    );
+    expect(crossSite.status).toBe(403);
     const direct = proxy(reqWithHosts({ host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000' }, 'POST'));
     expect(direct.status).toBe(200);
   });
@@ -116,6 +121,40 @@ describe('clientIp', () => {
     const { clientIp } = await loadAuth({ TRUST_PROXY: '3' });
     expect(clientIp(reqWithForwardedFor('203.0.113.9'))).toBe('203.0.113.9');
     expect(clientIp(reqWithForwardedFor())).toBe('direct');
+  });
+});
+
+describe('safeEqual', () => {
+  it('matches only byte-identical strings', async () => {
+    const { safeEqual } = await loadAuth({});
+    expect(safeEqual('secret-token', 'secret-token')).toBe(true);
+    expect(safeEqual('', '')).toBe(true);
+    expect(safeEqual('secret-token', 'secret-tokeN')).toBe(false);
+    expect(safeEqual('secret-token', 'secret-toke')).toBe(false);
+    expect(safeEqual('secret-token', '')).toBe(false);
+  });
+
+  it('compares UTF-8 bytes, so code-point-equal but byte-different strings differ', async () => {
+    const { safeEqual } = await loadAuth({});
+    // Same code-point count, different byte length: "é" is two bytes in UTF-8.
+    expect(safeEqual('café', 'cafe')).toBe(false);
+    expect(safeEqual('café', 'café')).toBe(true);
+    // Same byte length, different content.
+    expect(safeEqual('ab', 'é')).toBe(false);
+  });
+
+  it('still runs a constant-time comparison when the lengths differ', async () => {
+    const crypto = await import('crypto');
+    const spy = vi.spyOn(crypto.default, 'timingSafeEqual');
+    try {
+      const { safeEqual } = await loadAuth({});
+      expect(safeEqual('short', 'much longer secret')).toBe(false);
+      // A length mismatch must not return before timingSafeEqual runs, or response timing would
+      // separate "wrong length" from "wrong content" for free.
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

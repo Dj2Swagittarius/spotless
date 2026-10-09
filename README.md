@@ -288,6 +288,7 @@ database is reachable and `503` otherwise, so `docker ps` and orchestrators can 
 | `AUTH_MIN_PASSWORD_LENGTH` | `4` | Minimum web password length. `4` allows a PIN on a home network; raise it (e.g. `12`) if Spotless is reachable from the internet |
 | `TRUST_PROXY` | *(off)* | Number of reverse-proxy hops in front of Spotless (usually `1`). Lets login throttling read the client IP from `X-Forwarded-For`, and lets the Spotify / Last.fm OAuth callback URLs be built from `X-Forwarded-Host` / `X-Forwarded-Proto` (set it when your proxy rewrites the `Host` header, e.g. nginx `proxy_set_header Host $proxy_host`). Leave unset when clients connect directly, because the headers can be forged |
 | `DJ_PROVIDER` | `lmstudio` | AI DJ: default LLM provider id (`lmstudio`, `ollama`, `custom`, `openai`, `anthropic`, `gemini`, `mistral`, `deepseek`, `xai`, `groq` or `openrouter`; unknown values fall back to `lmstudio`). Settings → AI DJ overrides it |
+| `DJ_RATE_LIMIT_PER_MIN` | `20` chat / `60` speak / `30` segue / `30` transcribe | AI DJ: requests per minute per profile and route; one number overrides all four, `0` disables the limit |
 | `BACKUP_DIR` | `DATA_DIR/backups` | Where the daily database backups are written. In Docker it may be its own mount (e.g. `./backups:/backups`); the entrypoint makes it writable by `PUID`/`PGID` the same way as `/data` |
 | `LOG_LEVEL` | `info` | Server log verbosity: `debug`, `info`, `warn` or `error` |
 | `HOSTNAME` | `0.0.0.0` | Bind address of the production server |

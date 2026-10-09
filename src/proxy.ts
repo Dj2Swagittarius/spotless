@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { clearSessionCookie, expectedHost, sessionFromRequest } from '@/lib/auth';
+import { clearSessionCookie, originHosts, sessionFromRequest } from '@/lib/auth';
 
 // spotify login/callback authenticate themselves (session or one-time handoff, server-side OAuth state);
 // health is a liveness probe for Docker/uptime monitors and exposes nothing user-specific
@@ -24,8 +24,8 @@ function sameOrigin(req: NextRequest): boolean {
   const origin = req.headers.get('origin');
   if (!origin) return true; // non-browser clients may legitimately omit Origin
   try {
-    // X-Forwarded-Host is only believed behind TRUST_PROXY, the same rule OAuth callback URLs use
-    return new URL(origin).host === expectedHost(req);
+    // Host as the app saw it, or X-Forwarded-Host (safe here: see originHosts in lib/auth)
+    return originHosts(req).includes(new URL(origin).host);
   } catch {
     return false;
   }
