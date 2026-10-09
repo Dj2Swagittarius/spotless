@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import TrackList from '@/components/TrackList';
 import { CardGrid, AlbumCard, ArtistCard, LoadErrorState } from '@/components/Cards';
 import { SearchIcon, PlayIcon, PauseIcon, MicIcon } from '@/components/Icons';
+import { RowListSkeleton } from '@/components/Skeleton';
 import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
 import type { Track, Album, Artist } from '@/lib/types';
 
@@ -131,6 +132,8 @@ function Search() {
     const ac = new AbortController();
     const t = setTimeout(() => {
       setStatus('loading');
+      // the previous query's Deezer block must not sit under this query's library results if its fetch fails
+      setDz(null);
       getJson<Results>(`/api/search?q=${encodeURIComponent(query)}`, { signal: ac.signal })
         .then((d) => {
           setResults(d);
@@ -141,8 +144,10 @@ function Search() {
         });
       // Deezer is a bonus: when it fails the library results still show
       getJson<DzResults>(`/api/search/deezer?q=${encodeURIComponent(query)}`, { signal: ac.signal })
-        .then(setDz)
-        .catch(() => {});
+        .then((d) => setDz(d ?? null))
+        .catch((err) => {
+          if (!isAbortError(err)) setDz(null);
+        });
     }, 300);
     return () => {
       clearTimeout(t);
@@ -210,6 +215,9 @@ function Search() {
 
       {status === 'error' && <LoadErrorState what="search results" onRetry={() => setAttempt((n) => n + 1)} />}
 
+      {/* first query: nothing to keep on screen yet, so show a skeleton; later queries keep the previous results */}
+      {status === 'loading' && !results && <RowListSkeleton count={6} />}
+
       {results && status !== 'error' && (
         <>
           {results.tracks.length > 0 && (
@@ -242,7 +250,7 @@ function Search() {
         </>
       )}
 
-      {hasDz && (
+      {hasDz && status !== 'error' && (
         <section className="border-t border-highlight pt-6">
           <h2 className="mb-1 text-2xl font-bold">Not in your library</h2>
           <p className="mb-4 text-sm text-subdued">From Deezer — grab anything via Lidarr.</p>

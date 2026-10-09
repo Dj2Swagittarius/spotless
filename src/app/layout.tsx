@@ -1,20 +1,21 @@
 import type { Metadata, Viewport } from 'next';
-import { Figtree, Bricolage_Grotesque } from 'next/font/google';
+import localFont from 'next/font/local';
 import './globals.css';
 import Shell from '@/components/Shell';
 
-// closest open font to Spotify's Circular: geometric, rounded, friendly
-const figtree = Figtree({
-  subsets: ['latin'],
-  weight: ['400', '500', '600', '700', '800'],
+// closest open font to Spotify's Circular: geometric, rounded, friendly. Self-hosted (OFL, see
+// fonts/LICENSE-*.txt) so builds never depend on fetching Google Fonts.
+const figtree = localFont({
+  src: './fonts/figtree-latin-wght-normal.woff2',
+  weight: '300 900',
   variable: '--font-app',
   display: 'swap',
 });
 
 // display face for the wordmark only — sharper, more character than the UI font
-const bricolage = Bricolage_Grotesque({
-  subsets: ['latin'],
-  weight: ['800'],
+const bricolage = localFont({
+  src: './fonts/bricolage-grotesque-latin-wght-normal.woff2',
+  weight: '200 800',
   variable: '--font-display',
   display: 'swap',
 });

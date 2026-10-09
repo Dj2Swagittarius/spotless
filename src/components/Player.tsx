@@ -55,6 +55,10 @@ const SWITCH_COOLDOWN_MS = 8000;
 // Swapping the source (a downshift, or a seek on a transcode) makes the element buffer
 // by definition — don't score that against the connection.
 const STALL_GRACE_MS = 4000;
+// Buffering at the start of a track is never scored as a stall — until it has gone on
+// this long with nothing played. A transcode pipe that hangs before its first byte, or
+// a restream at a new offset that never comes up, would otherwise sit buffering forever.
+const START_STALL_MS = 12000;
 // Ceiling on reloads of one track, so bad tags or a dead server can't wedge the player
 // in a retry loop — after this it gives up and moves on like any other failed track.
 const MAX_RESTREAMS_PER_TRACK = 4;
@@ -105,6 +109,8 @@ export default function Player() {
   // pending "seek once metadata is in" for a raw-rung restream, so it can be dropped when
   // the element moves on to another stream before the metadata ever arrives
   const resumeSeekRef = useRef<{ el: HTMLAudioElement; handler: () => void } | null>(null);
+  // one-shot "still nothing played" check armed by the first buffering of a stream
+  const startStallRef = useRef<{ el: HTMLAudioElement; timer: ReturnType<typeof setTimeout> } | null>(null);
   // listening bookkeeping for the current play of the current track
   const listenedRef = useRef(0); // seconds actually heard (timeupdate deltas)
   const lastPosRef = useRef<number | null>(null); // position at the previous timeupdate
@@ -119,6 +125,7 @@ export default function Player() {
   const shuffle = usePlayer((s) => s.shuffle);
   const repeat = usePlayer((s) => s.repeat);
   const volume = usePlayer((s) => s.volume);
+  const duck = usePlayer((s) => s.duck);
   const radio = usePlayer((s) => s.radio);
   const toggle = usePlayer((s) => s.toggle);
   const next = usePlayer((s) => s.next);
@@ -154,9 +161,17 @@ export default function Player() {
 
   const els = () => [audioARef.current, audioBRef.current] as const;
 
+  /** Element volume for a track: the user's setting, DJ ducking and ReplayGain, capped at 1. */
+  // Reads the store directly so deferred callers (the start-stall timer, fade ticks) never apply a
+  // volume or duck captured by the render that created them.
+  const levelFor = (gain?: number | null) => {
+    const live = usePlayer.getState();
+    return Math.min(1, live.volume * live.duck * gainMult(gain));
+  };
+
   // restore the saved session once we are on the client (see skipHydration in the store):
   // the queue comes back paused at the saved index, nothing starts playing by itself.
-  // With storage blocked (private mode) the middleware never attaches `persist` at all.
+  // Until this has run, the store drops its writes so they can't clobber the saved queue.
   useEffect(() => {
     usePlayer.persist?.rehydrate()?.catch(() => {});
   }, []);
@@ -167,6 +182,11 @@ export default function Player() {
     resumeSeekRef.current = null;
   };
 
+  const clearStartStall = () => {
+    if (startStallRef.current) clearTimeout(startStallRef.current.timer);
+    startStallRef.current = null;
+  };
+
   // Each element remembers the rung and start offset of the stream it holds, so a
   // downshift can compare against what is actually playing (not what the ladder said
   // when the track loaded) and resume at the right second after the source swap.
@@ -174,7 +194,9 @@ export default function Player() {
     RUNGS.find((r) => r.id === a?.dataset.rung) ?? currentRung();
   const offsetOf = (a: HTMLAudioElement | null) => Number(a?.dataset.offset ?? 0) || 0;
   const setSrc = (a: HTMLAudioElement, t: Track, rung: Rung, offset = 0) => {
-    if (resumeSeekRef.current?.el === a) clearResumeSeek(); // whatever was pending is for a stream that is gone
+    // whatever was pending is for a stream that is gone
+    if (resumeSeekRef.current?.el === a) clearResumeSeek();
+    if (startStallRef.current?.el === a) clearStartStall();
     a.dataset.rung = rung.id;
     // only a transcode starts the stream at `offset` (?offset=), so only then does the
     // element's own clock need shifting; a raw file seeks instead and its clock is absolute
@@ -221,7 +243,7 @@ export default function Player() {
         // nothing loaded yet
       }
     }
-    if (a) a.volume = Math.min(1, volume * gainMult(track?.gain));
+    if (a) a.volume = levelFor(track?.gain);
   };
 
   // EQ: route both elements through the filter chain (no-op until the user enables it);
@@ -233,8 +255,14 @@ export default function Player() {
     return () => window.removeEventListener('eq-changed', attach);
   }, []);
 
-  // drop a pending raw-rung resume seek when the player unmounts
-  useEffect(() => clearResumeSeek, []);
+  // drop a pending raw-rung resume seek and start-of-track stall check when the player unmounts
+  useEffect(
+    () => () => {
+      clearResumeSeek();
+      clearStartStall();
+    },
+    []
+  );
 
   /** Forget the listening bookkeeping: a new track, or a replay of this one. */
   const resetPlayTracking = () => {
@@ -258,6 +286,7 @@ export default function Player() {
     const a = els()[active];
     if (!a || !track) return;
     clearResumeSeek();
+    clearStartStall();
     resetPlayTracking();
     // seed from the tagged length: a transcoded pipe may never report a usable duration
     setDuration(track.streamUrl ? 0 : track.duration || 0);
@@ -274,7 +303,7 @@ export default function Player() {
       // answer a metadata request nobody asked for) — the first play() loads it
       a.preload = isPlaying ? 'auto' : 'none';
       setSrc(a, track, currentRung());
-      a.volume = Math.min(1, volume * gainMult(track.gain));
+      a.volume = levelFor(track.gain);
       if (isPlaying) a.play().catch(() => {});
       setProgress(0);
     }
@@ -344,9 +373,9 @@ export default function Player() {
 
   useEffect(() => {
     const a = els()[active];
-    if (a && !fadingRef.current) a.volume = Math.min(1, volume * gainMult(track?.gain));
+    if (a && !fadingRef.current) a.volume = levelFor(track?.gain);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [volume, active]);
+  }, [volume, duck, active]);
 
   // Per-render snapshot for listeners that are registered once (keyboard, media session
   // seekto): they read through this instead of closing over a stale render.
@@ -399,9 +428,9 @@ export default function Player() {
       if (!usePlayer.getState().isPlaying) return;
       t += 0.1;
       const k = Math.min(1, t / cf);
-      const vol = usePlayer.getState().volume; // live, so a volume change mid-fade is honoured
-      b.volume = Math.min(1, vol * gainMult(nextTrack?.gain)) * k;
-      a.volume = Math.min(1, vol * gainMult(track?.gain)) * (1 - k);
+      const { volume: v, duck: d } = usePlayer.getState(); // live, so a volume change (or DJ duck) mid-fade is honoured
+      b.volume = Math.min(1, v * d * gainMult(nextTrack?.gain)) * k;
+      a.volume = Math.min(1, v * d * gainMult(track?.gain)) * (1 - k);
       if (k >= 1) {
         if (fadeTimerRef.current) clearInterval(fadeTimerRef.current);
         fadeTimerRef.current = null;
@@ -448,8 +477,9 @@ export default function Player() {
       resumeSeekRef.current = { el: a, handler };
       a.addEventListener('loadedmetadata', handler, { once: true });
     }
-    a.volume = Math.min(1, volume * gainMult(track.gain));
+    a.volume = levelFor(track.gain);
     setProgress(at);
+    lastPosRef.current = null; // the clock jumps to the new stream: don't score that gap as listening
     if (isPlaying) a.play().catch(() => {});
 
     // bring the already-preloaded next track down too, so it doesn't hit the same wall
@@ -464,20 +494,57 @@ export default function Player() {
   /** Rung we should be on right now: the ladder in Auto, otherwise the fixed choice. */
   const wantedRung = (a: HTMLAudioElement) => (loadQuality() === 'auto' ? currentRung() : rungOf(a));
 
+  /** Nothing of this stream has reached the speakers yet. */
+  const nothingPlayed = (a: HTMLAudioElement) => a.played.length === 0 && a.currentTime <= 0.5;
+
+  /**
+   * A genuine rebuffer on the active element: score it against the connection (Auto
+   * walks the ladder down) and reload where a reload can help — a raw file re-buffers
+   * on its own via byte ranges, a transcode pipe never will.
+   */
+  const recoverStall = (a: HTMLAudioElement) => {
+    const have = rungOf(a);
+    const auto = loadQuality() === 'auto';
+    if (auto) noteStall();
+    const target = auto ? currentRung() : have;
+    if (!isLower(target, have) && have.bitrate === 0) return;
+    restream(a, target);
+  };
+
+  /**
+   * Buffering at the start of a stream is exempt from stall scoring, so a stream that
+   * never produces anything needs its own deadline: if it is still trying to play with
+   * nothing heard when this fires, it is a stall after all. One per stream — setSrc and
+   * the first `playing` drop it.
+   */
+  const armStartStall = (a: HTMLAudioElement) => {
+    if (startStallRef.current) return;
+    const timer = setTimeout(() => {
+      startStallRef.current = null;
+      if (a !== els()[active] || fadingRef.current || !usePlayer.getState().isPlaying) return;
+      if (a.paused || a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA || !nothingPlayed(a)) return;
+      recoverStall(a);
+    }, START_STALL_MS);
+    startStallRef.current = { el: a, timer };
+  };
+
   // rebuffering is the signal the network hints can't give us — a weak cell still
   // reports itself as "4g" right up until the music stops
   const onWaiting = (e: React.SyntheticEvent<HTMLAudioElement>) => {
     const a = e.currentTarget;
     if (a !== els()[active] || fadingRef.current) return;
     if (!track || track.streamUrl || a.seeking) return;
+    const fresh = nothingPlayed(a);
+    // the deadline is armed even inside the grace window: a restream that never comes
+    // up only ever fires this once, right as it starts
+    if (fresh && !a.paused) armStartStall(a);
     if (Date.now() - lastSwitchRef.current < STALL_GRACE_MS) return; // our own source swap
-    const auto = loadQuality() === 'auto';
-    const have = rungOf(a);
-    const want = auto ? currentRung() : have; // what the ladder says before this event is scored
-    // At the very start of a track, buffering is just buffering — never a stall. The only
-    // reason to act here is a ladder that already dropped below what we asked for.
-    const hasPlayed = a.played.length > 0 || a.currentTime > 0.5;
-    if (!hasPlayed) {
+    // At the very start of a track, buffering is just buffering — never a stall (the
+    // deadline above catches one that never ends). The only reason to act here is a
+    // ladder that already dropped below what we asked for.
+    if (fresh) {
+      const have = rungOf(a);
+      const want = loadQuality() === 'auto' ? currentRung() : have;
       if (isLower(want, have)) restream(a, want);
       return;
     }
@@ -486,14 +553,12 @@ export default function Player() {
     // element the browser stopped fetching for, and for the fetch going quiet while
     // plenty is still buffered.
     if (a.paused || a.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
-    let target = want;
-    if (auto) {
-      noteStall();
-      target = currentRung();
-    }
-    // a raw file re-buffers on its own via byte ranges; a transcode never will
-    if (!isLower(target, have) && have.bitrate === 0) return;
-    restream(a, target);
+    recoverStall(a);
+  };
+
+  // sound is coming out: whatever start-of-stream deadline was pending is moot
+  const onPlaying = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    if (startStallRef.current?.el === e.currentTarget) clearStartStall();
   };
 
   // a failed request used to end the song then and there — the element just sits at the
@@ -519,7 +584,7 @@ export default function Player() {
       if (isLower(want, rungOf(a))) restream(a, want);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, track?.id, isPlaying, volume]);
+  }, [active, track?.id, isPlaying, volume, duck]);
 
   /** Enough of the track heard? Then it goes on the record — once per play. */
   const maybeMarkPlayed = (t: Track) => {
@@ -580,7 +645,16 @@ export default function Player() {
     if (repeat === 'one') {
       // a replay is a fresh play as far as history and Last.fm are concerned
       resetPlayTracking();
-      a.currentTime = 0;
+      const rung = rungOf(a);
+      if (track && !track.streamUrl && rung.bitrate > 0) {
+        // a transcode's clock is relative to its ?offset= (so 0 is wherever the last seek
+        // landed) and the pipe may not seek at all: reload it from the top instead
+        lastSwitchRef.current = Date.now();
+        setSrc(a, track, rung, 0);
+      } else {
+        a.currentTime = 0;
+      }
+      setProgress(0);
       a.play().catch(() => {});
       if (track) markStarted(track);
       return;
@@ -588,7 +662,7 @@ export default function Player() {
     const b = els()[1 - active];
     if (nextTrack && b && hasSrc(b, nextTrack)) {
       // gapless: preloaded element starts instantly
-      b.volume = Math.min(1, volume * gainMult(nextTrack.gain));
+      b.volume = levelFor(nextTrack.gain);
       b.play().catch(() => {});
       a.removeAttribute('src');
       setActive(1 - active);
@@ -599,6 +673,8 @@ export default function Player() {
   const onPlayPause = (e: React.SyntheticEvent<HTMLAudioElement>, playing: boolean) => {
     if (e.currentTarget !== els()[active] || fadingRef.current) return;
     setPlaying(playing);
+    // a paused stream isn't fetching, so "nothing played yet" is no longer a stall
+    if (!playing) clearStartStall();
     // the first 'play' after a (re)load is when the track really starts for Last.fm
     if (playing && track) markStarted(track);
   };
@@ -631,7 +707,7 @@ export default function Player() {
     const a = els()[active];
     if (!a) return;
     cancelFade();
-    a.volume = Math.min(1, volume * gainMult(track?.gain));
+    a.volume = levelFor(track?.gain);
     const rung = rungOf(a);
     if (track && !track.streamUrl && rung.bitrate > 0) {
       // transcodes are an unseekable pipe — restart it at the target second instead
@@ -642,6 +718,9 @@ export default function Player() {
       a.currentTime = v - offsetOf(a);
     }
     setProgress(v);
+    // the first timeupdate after a jump is the jump itself, not time listened — otherwise
+    // scrubbing the slider half a second at a time would count toward a scrobble
+    lastPosRef.current = null;
   };
 
   /** Play/pause from a click or key: the gesture is what lets the EQ's AudioContext run. */
@@ -724,6 +803,7 @@ export default function Player() {
     onEnded,
     onPlay: (e: React.SyntheticEvent<HTMLAudioElement>) => onPlayPause(e, true),
     onPause: (e: React.SyntheticEvent<HTMLAudioElement>) => onPlayPause(e, false),
+    onPlaying,
     onWaiting,
     // 'stalled' is the fetch going quiet; onWaiting only acts on it once the decoder runs dry
     onStalled: onWaiting,

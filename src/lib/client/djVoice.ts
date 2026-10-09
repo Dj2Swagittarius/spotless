@@ -9,8 +9,12 @@ import { usePlayer } from '@/store/player';
  * Music is ducked while the DJ talks.
  */
 
+// Music level while the DJ talks, as a multiplier on the user's volume. It goes through
+// the store's non-persisted `duck` field rather than `volume`, so the slider keeps
+// showing the real setting and a reload mid-segue doesn't come back at 30%.
+const DUCK_GAIN = 0.3;
+
 let current: HTMLAudioElement | null = null;
-let duckedFrom: number | null = null;
 // bumped by every speak/stop: a line whose audio arrives after a newer request is dropped,
 // so repeated clicks while the voice is still being generated can't stack up
 let generation = 0;
@@ -32,18 +36,11 @@ export function onSpeakingChange(cb: (text: string | null) => void): () => void 
 }
 
 function duck() {
-  const { volume, setVolume } = usePlayer.getState();
-  if (duckedFrom === null) {
-    duckedFrom = volume;
-    setVolume(volume * 0.3);
-  }
+  usePlayer.getState().setDuck(DUCK_GAIN);
 }
 
 function unduck() {
-  if (duckedFrom !== null) {
-    usePlayer.getState().setVolume(duckedFrom);
-    duckedFrom = null;
-  }
+  usePlayer.getState().setDuck(1);
 }
 
 export function stopSpeaking() {

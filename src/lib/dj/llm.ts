@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { apiKeyFor, llmProvider, type DjConfig } from './config';
+import { apiKeyFor, hostOf, llmProvider, type DjConfig } from './config';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -40,7 +40,16 @@ export const REPLY_SCHEMA = {
   required: ['say', 'actions'],
 } as const;
 
-export class LlmError extends Error {}
+export class LlmError extends Error {
+  /** Wording any profile may see: no server hosts, URLs or upstream response bodies. */
+  readonly safe: string;
+
+  constructor(message: string, safe = message) {
+    super(message);
+    this.name = 'LlmError';
+    this.safe = safe;
+  }
+}
 
 /** Remove reasoning that some local servers leave inline in the answer. */
 export function stripReasoning(text: string): string {
@@ -52,6 +61,8 @@ export function stripReasoning(text: string): string {
 }
 
 async function postJson(url: string, body: unknown, headers: Record<string, string>, timeoutMs: number) {
+  // computed up front: a malformed URL must surface as a clean LlmError, not a TypeError in a catch
+  const host = hostOf(url);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -63,18 +74,18 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
   } catch (err) {
     const msg = String(err);
     if (/timeout|aborted/i.test(msg)) throw new LlmError(`The model took longer than ${Math.round(timeoutMs / 1000)}s to answer`);
-    throw new LlmError(`Could not reach ${new URL(url).host}: ${msg.slice(0, 200)}`);
+    throw new LlmError(`Could not reach ${host}: ${msg.slice(0, 200)}`, 'The DJ server could not be reached.');
   }
   const text = await res.text();
   if (!res.ok) {
-    const err = new LlmError(`HTTP ${res.status} from ${new URL(url).host}: ${text.slice(0, 300)}`);
+    const err = new LlmError(`HTTP ${res.status} from ${host}: ${text.slice(0, 300)}`, `The DJ server answered with an error (HTTP ${res.status}).`);
     (err as LlmError & { status?: number }).status = res.status;
     throw err;
   }
   try {
     return JSON.parse(text);
   } catch {
-    throw new LlmError(`Unexpected response from ${new URL(url).host}: ${text.slice(0, 200)}`);
+    throw new LlmError(`Unexpected response from ${host}: ${text.slice(0, 200)}`, 'The DJ server sent a reply that could not be read.');
   }
 }
 
@@ -103,7 +114,7 @@ export async function complete(
   const maxTokens = opts.maxTokens ?? 4096;
   const structured = opts.structured !== false;
 
-  if (p.kind === 'anthropic') return completeAnthropic(key, model, system, messages, maxTokens);
+  if (p.kind === 'anthropic') return completeAnthropic(key, baseUrl, model, system, messages, maxTokens);
 
   if (p.kind === 'ollama') {
     const run = async (withFormat: boolean) => {
@@ -162,8 +173,9 @@ export async function complete(
 const FALLBACK_MODELS = /^claude-(opus-5|sonnet-5-5|fable-5)/;
 const EFFORT_MODELS = /^claude-(opus-[45]|sonnet-5|fable-5)/;
 
-async function completeAnthropic(apiKey: string, model: string, system: string, messages: ChatMessage[], maxTokens: number) {
-  const client = new Anthropic({ apiKey, timeout: HOSTED_TIMEOUT_MS, maxRetries: 1 });
+async function completeAnthropic(apiKey: string, baseURL: string, model: string, system: string, messages: ChatMessage[], maxTokens: number) {
+  // the Server URL the admin saved applies here too (a gateway or proxy in front of Anthropic)
+  const client = new Anthropic({ apiKey, baseURL, timeout: HOSTED_TIMEOUT_MS, maxRetries: 1 });
   const withFallback = FALLBACK_MODELS.test(model);
   try {
     const response = await client.beta.messages.create({
@@ -184,8 +196,10 @@ async function completeAnthropic(apiKey: string, model: string, system: string, 
     if (err instanceof LlmError) throw err;
     if (err instanceof Anthropic.AuthenticationError) throw new LlmError('Anthropic rejected the API key.');
     if (err instanceof Anthropic.RateLimitError) throw new LlmError('Anthropic rate limit reached; try again shortly.');
-    if (err instanceof Anthropic.APIError) throw new LlmError(`Anthropic API error ${err.status}: ${err.message.slice(0, 300)}`);
-    throw new LlmError(`Could not reach Anthropic: ${String(err).slice(0, 200)}`);
+    if (err instanceof Anthropic.APIError) {
+      throw new LlmError(`Anthropic API error ${err.status}: ${err.message.slice(0, 300)}`, `Anthropic answered with an error (HTTP ${err.status}).`);
+    }
+    throw new LlmError(`Could not reach Anthropic: ${String(err).slice(0, 200)}`, 'Anthropic could not be reached.');
   }
 }
 
@@ -202,7 +216,8 @@ export async function autoModel(cfg: DjConfig): Promise<string> {
   try {
     models = (await listModels(cfg)).filter((m) => !/embed/i.test(m));
   } catch (err) {
-    throw new LlmError(`No model selected, and the local server could not be asked for one: ${err instanceof Error ? err.message : err}`);
+    const why = 'No model selected, and the local server could not be asked for one';
+    throw new LlmError(`${why}: ${err instanceof Error ? err.message : err}`, err instanceof LlmError ? `${why}: ${err.safe}` : `${why}.`);
   }
   const model = models.find((m) => /gpt-oss/i.test(m)) ?? models[0];
   if (!model) throw new LlmError('The local server has no models loaded. Load one in LM Studio (or pull one in Ollama).');
@@ -218,13 +233,13 @@ export async function listModels(cfg: DjConfig): Promise<string[]> {
   if (p.needsKey && !key) throw new LlmError(`${p.label} needs an API key first.`);
   if (p.kind === 'anthropic') {
     try {
-      const client = new Anthropic({ apiKey: key, timeout: 15000 });
+      const client = new Anthropic({ apiKey: key, baseURL: baseUrl, timeout: 15000 });
       const ids: string[] = [];
       for await (const m of client.models.list()) ids.push(m.id);
       return ids;
     } catch (err) {
       if (err instanceof Anthropic.AuthenticationError) throw new LlmError('Anthropic rejected the API key.');
-      throw new LlmError(`Could not list Anthropic models: ${String(err).slice(0, 200)}`);
+      throw new LlmError(`Could not list Anthropic models: ${String(err).slice(0, 200)}`, 'Anthropic could not be asked for its models.');
     }
   }
   const url = p.kind === 'ollama' ? `${baseUrl}/api/tags` : `${baseUrl}/models`;
@@ -233,9 +248,9 @@ export async function listModels(cfg: DjConfig): Promise<string[]> {
   try {
     res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
   } catch (err) {
-    throw new LlmError(`Could not reach ${baseUrl}: ${String(err).slice(0, 200)}`);
+    throw new LlmError(`Could not reach ${baseUrl}: ${String(err).slice(0, 200)}`, 'The model server could not be reached.');
   }
-  if (!res.ok) throw new LlmError(`HTTP ${res.status} listing models: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) throw new LlmError(`HTTP ${res.status} listing models: ${(await res.text()).slice(0, 200)}`, `The model server answered with an error (HTTP ${res.status}) when listing models.`);
   const data = await res.json();
   const ids: string[] =
     p.kind === 'ollama'

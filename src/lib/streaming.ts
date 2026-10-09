@@ -72,6 +72,12 @@ function etagMatches(candidate: string, etag: string): boolean {
   return strip(candidate) === strip(etag);
 }
 
+/** Strong comparison (RFC 9110 §8.8.3.2): both tags must be strong and byte-identical. */
+function etagMatchesStrongly(candidate: string, etag: string): boolean {
+  const c = candidate.trim();
+  return !/^W\//i.test(c) && !/^W\//i.test(etag) && c === etag;
+}
+
 /** True when the request's If-None-Match / If-Modified-Since say the client's copy is current. */
 export function isNotModified(req: Request, v: FileValidators): boolean {
   const inm = req.headers.get('if-none-match');
@@ -88,26 +94,30 @@ export function isNotModified(req: Request, v: FileValidators): boolean {
 }
 
 /**
- * If-Range: honour the Range only when the client's validator still matches, otherwise
- * send the whole file so a resumed download can't splice two versions together.
- * We only ever hand out our own weak tag, so a literal match against it is the right test.
+ * If-Range (RFC 9110 §13.1.5): honour the Range only when the client's validator still matches,
+ * otherwise send the whole file so a resumed download can't splice two versions together.
+ * The comparison is deliberately strict: an entity tag must match strongly (our own tag is weak,
+ * so it never does; browsers know that and send Last-Modified for a weak-tagged resource) and an
+ * HTTP-date must equal Last-Modified exactly, since a later date says nothing about which copy
+ * the client holds. Anything unparseable is a non-match, which is the safe direction.
  */
-function ifRangeMatches(ifRange: string, v: FileValidators): boolean {
+export function ifRangeMatches(ifRange: string, v: FileValidators): boolean {
   const t = ifRange.trim();
-  if (t.startsWith('"') || /^W\//i.test(t)) return etagMatches(t, v.etag);
+  if (t.startsWith('"') || /^W\//i.test(t)) return etagMatchesStrongly(t, v.etag);
   const at = Date.parse(t);
-  return Number.isFinite(at) && v.mtimeSec * 1000 <= at;
+  return Number.isFinite(at) && at === v.mtimeSec * 1000;
 }
 
-type ByteRange = { start: number; end: number } | 'unsatisfiable' | null;
+export type ByteRange = { start: number; end: number } | 'unsatisfiable' | null;
 
 /**
- * RFC 9110 §14.1.2 byte ranges. Returns null when the header is absent or not a byte range
- * we understand (serve the full 200), 'unsatisfiable' for a 416, else the inclusive range.
+ * RFC 9110 §14.1.2 byte ranges. Returns null when the header is absent, not a byte range we
+ * understand, or syntactically invalid (§14.1.1 says such a header MUST be ignored: serve the
+ * full 200), 'unsatisfiable' for a 416, else the inclusive range.
  * Multiple ranges: only the first is served. multipart/byteranges is never needed by audio
  * clients, and a 206 for a subset of the requested ranges is permitted by the spec.
  */
-function parseRange(header: string | null, size: number): ByteRange {
+export function parseRange(header: string | null, size: number): ByteRange {
   if (!header) return null;
   const m = header.match(/^\s*bytes\s*=\s*(.+)$/i);
   if (!m) return null;
@@ -123,7 +133,10 @@ function parseRange(header: string | null, size: number): ByteRange {
   }
   const start = Number(parts[1]);
   const end = parts[2] ? Number(parts[2]) : size - 1;
-  if (!Number.isSafeInteger(start) || start >= size || start > end) return 'unsatisfiable';
+  // first-pos past last-pos (bytes=500-100) is not a range at all, so it is ignored, not 416'd;
+  // an open-ended start past the end is a real range that this file simply cannot satisfy
+  if (parts[2] && start > end) return null;
+  if (!Number.isSafeInteger(start) || start >= size) return 'unsatisfiable';
   return { start, end: Math.min(end, size - 1) };
 }
 
@@ -253,7 +266,12 @@ export async function serveTrack(req: Request, filePath: string, opts: ServeOpti
     proc.once('error', () => resolve(false));
     proc.once('spawn', () => resolve(true));
   });
-  if (!spawned) return raw();
+  if (!spawned) {
+    if (offset === 0) return raw();
+    // No ffmpeg at all: a raw file cannot start mid-track either (see above), and unlike the
+    // cap there is nothing to wait for, so no Retry-After.
+    return new Response('transcoder unavailable', { status: 503, headers: { 'Cache-Control': 'no-store' } });
+  }
   // a late error (e.g. a failed kill) must not become an uncaught exception
   proc.on('error', (err) => console.warn(`[stream] ffmpeg error for ${filePath}: ${err.message}`));
 

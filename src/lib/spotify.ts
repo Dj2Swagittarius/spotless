@@ -345,12 +345,17 @@ async function accessToken(userId: number): Promise<string | null> {
   return (await inflight).access_token;
 }
 
-async function api<T>(token: string, path: string): Promise<T> {
+async function api<T>(userId: number, token: string, path: string): Promise<T> {
   const res = await fetch(`https://api.spotify.com/v1${path}`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) {
+    // The token was accepted by Spotify minutes ago (or just refreshed), so a 401 here means the
+    // grant itself was revoked. Drop it, as the refresh path does, so spotifyStatus() reports
+    // disconnected and the UI offers Connect instead of failing every import until the user
+    // disconnects by hand. 403 (e.g. a user missing from a dev-mode allowlist) keeps the tokens.
+    if (res.status === 401) delSetting(tokensKey(userId));
     throw new SpotifyApiError(`Spotify ${path.split('?')[0]} failed (${res.status})`, res.status, retryAfterFrom(res));
   }
   return (await res.json()) as T;
@@ -367,13 +372,14 @@ export async function importTaste(userId: number): Promise<SpotifyTaste> {
 
   const top = new Set<string>();
   for (const range of ['medium_term', 'long_term']) {
-    const page = await api<{ items: { name: string }[] }>(token, `/me/top/artists?limit=50&time_range=${range}`);
+    const page = await api<{ items: { name: string }[] }>(userId, token, `/me/top/artists?limit=50&time_range=${range}`);
     for (const a of page.items ?? []) top.add(a.name);
   }
 
   const saved = new Set<string>();
   for (let offset = 0; offset < 200; offset += 50) {
     const page = await api<{ items: { track: { artists: { name: string }[] } }[]; next: string | null }>(
+      userId,
       token,
       `/me/tracks?limit=50&offset=${offset}`
     );
@@ -429,6 +435,7 @@ export async function listPlaylists(userId: number): Promise<SpotifyPlaylistInfo
   const out: SpotifyPlaylistInfo[] = [];
   for (let offset = 0; offset < 250; offset += 50) {
     const page = await api<{ items: ({ id: string; name: string; tracks?: { total?: number } | null } | null)[]; next: string | null }>(
+      userId,
       token,
       `/me/playlists?limit=50&offset=${offset}`
     );
@@ -456,7 +463,7 @@ async function playlistTracks(userId: number, playlistId: string): Promise<Spoti
     const page = await api<{
       items: { track: { name: string; duration_ms: number; artists: { name: string }[]; album: { name: string } } | null }[];
       next: string | null;
-    }>(token, `/playlists/${encodeURIComponent(playlistId)}/tracks?limit=100&offset=${offset}&fields=next,items(track(name,duration_ms,artists(name),album(name)))`);
+    }>(userId, token, `/playlists/${encodeURIComponent(playlistId)}/tracks?limit=100&offset=${offset}&fields=next,items(track(name,duration_ms,artists(name),album(name)))`);
     for (const item of page.items ?? []) {
       const t = item?.track;
       if (!t?.name) continue; // deleted/local-only entries

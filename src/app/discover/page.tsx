@@ -208,6 +208,19 @@ export default function DiscoverPage() {
     setDlState((s) => ({ ...s, [artist]: res?.ok ? data.status : `error: ${data.error ?? 'request failed'}` }));
   };
 
+  // album rows (new releases, collection gaps): 'busy' | 'sent' | 'requested' | 'fail' under `key`; a failed or
+  // rejected request must land on 'fail', not stay 'busy', so the row shows "Failed" instead of "Sending…" forever
+  const grabAlbum = async (key: string, artist: string, album: string) => {
+    setDlState((s) => ({ ...s, [key]: 'busy' }));
+    const res = await fetch('/api/lidarr/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artist, album }),
+    }).catch(() => null);
+    const d = res ? await res.json().catch(() => ({})) : {};
+    setDlState((s) => ({ ...s, [key]: res?.ok ? (d.status === 'requested' ? 'requested' : 'sent') : 'fail' }));
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
@@ -346,27 +359,17 @@ export default function DiscoverPage() {
                     {playingUrl === `rel|${r.artist}|${r.title}` ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
                   </button>
                   {lidarrConfigured && (
-                    dlState[`${r.artist}|${r.title}`] ? (
+                    dlState[`${r.artist}|${r.title}`] === 'busy' ? (
+                      <span className="text-xs text-subdued">Sending…</span>
+                    ) : dlState[`${r.artist}|${r.title}`] === 'fail' ? (
+                      <span className="text-xs text-negative">Failed</span>
+                    ) : dlState[`${r.artist}|${r.title}`] ? (
                       <span className="text-xs font-medium text-accent">
-                        {dlState[`${r.artist}|${r.title}`] === 'busy'
-                          ? 'Sending…'
-                          : dlState[`${r.artist}|${r.title}`] === 'requested'
-                            ? '✓ Requested'
-                            : '✓ Sent'}
+                        {dlState[`${r.artist}|${r.title}`] === 'requested' ? '✓ Requested' : '✓ Sent'}
                       </span>
                     ) : (
                       <button
-                        onClick={async () => {
-                          const key = `${r.artist}|${r.title}`;
-                          setDlState((s) => ({ ...s, [key]: 'busy' }));
-                          const res = await fetch('/api/lidarr/add', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ artist: r.artist, album: r.title }),
-                          });
-                          const d = await res.json().catch(() => ({}));
-                          setDlState((s) => ({ ...s, [key]: res.ok ? (d.status === 'requested' ? 'requested' : 'sent') : 'busy' }));
-                        }}
+                        onClick={() => grabAlbum(`${r.artist}|${r.title}`, r.artist, r.title)}
                         className="rounded-full border border-border px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-subdued hover:border-white hover:text-white"
                         title={isAdmin ? 'Get via Lidarr' : 'Request download'}
                       >
@@ -448,18 +451,11 @@ export default function DiscoverPage() {
                       <span className="text-xs font-medium text-accent">✓ Sent</span>
                     ) : st === 'requested' ? (
                       <span className="text-xs font-medium text-accent">✓ Requested</span>
+                    ) : st === 'fail' ? (
+                      <span className="text-xs text-negative">Failed</span>
                     ) : (
                       <button
-                        onClick={async () => {
-                          setDlState((s) => ({ ...s, [key]: 'busy' }));
-                          const res = await fetch('/api/lidarr/add', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ artist: g.artist, album: g.title }),
-                          });
-                          const d = await res.json().catch(() => ({}));
-                          setDlState((s) => ({ ...s, [key]: res.ok ? (d.status === 'requested' ? 'requested' : 'sent') : 'busy' }));
-                        }}
+                        onClick={() => grabAlbum(key, g.artist, g.title)}
                         className="rounded-full border border-border px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-subdued hover:border-white hover:text-white"
                         title={isAdmin ? `Get "${g.title}" via Lidarr` : `Request download of "${g.title}"`}
                         aria-label={isAdmin ? `Get "${g.title}" via Lidarr` : `Request download of "${g.title}"`}

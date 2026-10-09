@@ -51,6 +51,22 @@ async function derive(password: string, salt: Buffer, keylen: number, N: number,
   }
 }
 
+/**
+ * Constant-time comparison of two secrets (webhook tokens, OAuth state, app passwords) as
+ * UTF-8 bytes. crypto.timingSafeEqual throws on unequal lengths, so a length mismatch compares
+ * `a` against itself before returning false: the call then costs one comparison either way and a
+ * timing probe learns at most the secret's length, never its content.
+ */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ab.length !== bb.length) {
+    crypto.timingSafeEqual(ab, ab);
+    return false;
+  }
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 export interface AuthSession {
   userId: number;
   tokenHash: string;
@@ -193,20 +209,50 @@ export function trustedProxyHops(): number {
 const HOST_PATTERN = /^(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::\d{1,5})?$/i;
 
 /**
- * Public origin of this request, for building absolute callback/redirect URLs. X-Forwarded-Host
- * is only believed behind a trusted proxy (TRUST_PROXY): a forged host would point OAuth
- * callbacks at an attacker's server. The scheme follows the same decision as secureCookieFor,
- * because a Secure cookie set alongside the redirect only travels back over https.
- * The Host header is preferred over nextUrl, which rewrites loopback addresses to "localhost":
- * a cookie set while browsing 127.0.0.1 would never reach a callback issued to localhost.
+ * The host[:port] the browser addressed, as every trust decision about a request's host should
+ * see it: the Host header (nextUrl rewrites loopback addresses to "localhost"), replaced by
+ * X-Forwarded-Host only behind a trusted proxy (TRUST_PROXY). Without TRUST_PROXY the forwarded
+ * header is client-controlled, so a forged value would point OAuth callbacks at an attacker's
+ * server or let a cross-site POST pass the CSRF origin check. Shared by requestOrigin and the
+ * proxy's CSRF check so both apply one policy. Empty when neither source yields a valid host.
  */
-export function requestOrigin(req: NextRequest): string {
+export function expectedHost(req: NextRequest): string {
   const hostHeader = req.headers.get('host')?.trim();
   let host = hostHeader && HOST_PATTERN.test(hostHeader) ? hostHeader : req.nextUrl.host;
-  let protocol = req.nextUrl.protocol;
   if (trustedProxyHops() > 0) {
     const forwardedHost = firstForwarded(req, 'x-forwarded-host');
     if (forwardedHost && HOST_PATTERN.test(forwardedHost)) host = forwardedHost;
+  }
+  return host;
+}
+
+/**
+ * Hosts a browser's Origin may legitimately name for a same-origin request: the host the app
+ * saw (expectedHost) and, when present, the first X-Forwarded-Host. The forwarded value is
+ * accepted here even without TRUST_PROXY because this only feeds the CSRF origin comparison: a
+ * cross-site page cannot attach X-Forwarded-Host to a request without a CORS preflight, which
+ * this app never grants, so a forged value gains an attacker nothing, while rejecting it would
+ * break every browser write behind a reverse proxy that rewrites Host (Apache default, nginx
+ * without proxy_set_header Host). Building absolute URLs still goes through requestOrigin,
+ * which keeps requiring TRUST_PROXY.
+ */
+export function originHosts(req: NextRequest): string[] {
+  const hosts = [expectedHost(req)];
+  const forwardedHost = firstForwarded(req, 'x-forwarded-host');
+  if (forwardedHost && HOST_PATTERN.test(forwardedHost) && !hosts.includes(forwardedHost)) hosts.push(forwardedHost);
+  return hosts;
+}
+
+/**
+ * Public origin of this request, for building absolute callback/redirect URLs. The host comes
+ * from expectedHost (X-Forwarded-Host only behind TRUST_PROXY). The scheme follows the same
+ * decision as secureCookieFor, because a Secure cookie set alongside the redirect only travels
+ * back over https.
+ */
+export function requestOrigin(req: NextRequest): string {
+  const host = expectedHost(req);
+  let protocol = req.nextUrl.protocol;
+  if (trustedProxyHops() > 0) {
     const forwardedProto = firstForwarded(req, 'x-forwarded-proto')?.toLowerCase();
     if (forwardedProto === 'http' || forwardedProto === 'https') protocol = `${forwardedProto}:`;
   }

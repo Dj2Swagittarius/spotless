@@ -1,10 +1,36 @@
 import { getSetting, setSetting } from '../db';
+import { createLogger } from '../log';
 
 /**
  * AI DJ configuration: one server-wide setup (admin only) shared by every profile.
  * Everything defaults to local servers (LM Studio first) so nothing leaves the machine unless the
  * admin explicitly picks a hosted provider.
  */
+
+const log = createLogger('dj');
+
+/**
+ * An http(s) URL from the environment, or the fallback when the variable is unset or malformed.
+ * Validated once at startup so a value like LMSTUDIO_URL=localhost:1234 cannot blow up later
+ * inside an error handler.
+ */
+function envUrl(name: string, fallback: string): string {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const url = cleanBaseUrl(raw);
+  if (url) return url;
+  log.warn(`ignoring ${name}: not an http(s) URL, using ${fallback}`);
+  return fallback;
+}
+
+/** Host of a URL for logs and admin-facing messages; never throws on a malformed value. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url.slice(0, 80);
+  }
+}
 
 export type LlmProviderId =
   | 'ollama'
@@ -43,7 +69,7 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     label: 'LM Studio (local)',
     local: true,
     kind: 'openai',
-    defaultBaseUrl: process.env.LMSTUDIO_URL || 'http://localhost:1234/v1',
+    defaultBaseUrl: envUrl('LMSTUDIO_URL', 'http://localhost:1234/v1'),
     needsKey: false,
     structured: 'json_schema',
     examples: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'qwen/qwen3-14b', 'google/gemma-3-12b'],
@@ -53,9 +79,10 @@ export const LLM_PROVIDERS: LlmProvider[] = [
     label: 'Ollama (local)',
     local: true,
     kind: 'ollama',
-    defaultBaseUrl: process.env.OLLAMA_URL || 'http://localhost:11434',
+    defaultBaseUrl: envUrl('OLLAMA_URL', 'http://localhost:11434'),
     needsKey: false,
-    structured: 'none',
+    // Ollama's /api/chat takes a JSON schema in `format`; older builds that reject it get a plain retry
+    structured: 'ollama_schema',
     examples: ['gpt-oss:20b', 'gpt-oss:120b', 'qwen3:14b', 'gemma3:12b', 'mistral-small3.2'],
   },
   {
@@ -94,7 +121,7 @@ export const TTS_PROVIDERS: TtsProvider[] = [
     id: 'local',
     label: 'Local speech server (Kokoro-FastAPI, Speaches, LocalAI… OpenAI-compatible)',
     local: true,
-    defaultBaseUrl: process.env.TTS_URL || 'http://localhost:8880/v1',
+    defaultBaseUrl: envUrl('TTS_URL', 'http://localhost:8880/v1'),
     defaultModel: 'kokoro',
     defaultVoice: 'am_michael',
     needsKey: false,
@@ -120,7 +147,7 @@ export const STT_PROVIDERS: SttProvider[] = [
     id: 'local',
     label: 'Local Whisper server (Speaches, LocalAI, whisper.cpp… OpenAI-compatible)',
     local: true,
-    defaultBaseUrl: process.env.STT_URL || 'http://localhost:8000/v1',
+    defaultBaseUrl: envUrl('STT_URL', 'http://localhost:8000/v1'),
     defaultModel: 'Systran/faster-whisper-small',
     needsKey: false,
   },

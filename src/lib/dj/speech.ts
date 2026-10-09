@@ -1,18 +1,31 @@
-import { apiKeyFor, sttProvider, ttsProvider, type DjConfig } from './config';
+import { apiKeyFor, hostOf, sttProvider, ttsProvider, type DjConfig } from './config';
 
-export class SpeechError extends Error {}
+export class SpeechError extends Error {
+  /** Wording any profile may see: no server hosts, URLs or upstream response bodies. */
+  readonly safe: string;
+
+  constructor(message: string, safe = message) {
+    super(message);
+    this.name = 'SpeechError';
+    this.safe = safe;
+  }
+}
 
 const DJ_STYLE =
   'Speak like a charismatic late-night radio DJ: relaxed, warm, confident, with natural pacing and a little smile in the voice.';
 
 async function call(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  // computed up front: a malformed URL must surface as a clean SpeechError, not a TypeError in a catch
+  const host = hostOf(url);
   let res: Response;
   try {
     res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
-    throw new SpeechError(`Could not reach ${new URL(url).host}: ${String(err).slice(0, 200)}`);
+    throw new SpeechError(`Could not reach ${host}: ${String(err).slice(0, 200)}`, 'The speech server could not be reached.');
   }
-  if (!res.ok) throw new SpeechError(`HTTP ${res.status} from ${new URL(url).host}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) {
+    throw new SpeechError(`HTTP ${res.status} from ${host}: ${(await res.text()).slice(0, 300)}`, `The speech server answered with an error (HTTP ${res.status}).`);
+  }
   return res;
 }
 

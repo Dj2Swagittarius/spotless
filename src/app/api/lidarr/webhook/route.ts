@@ -1,5 +1,5 @@
-import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { safeEqual } from '@/lib/auth';
 import { scanLibrary } from '@/lib/scanner';
 
 export const dynamic = 'force-dynamic';
@@ -26,14 +26,6 @@ function scheduleScan() {
   }, delay);
 }
 
-function tokenMatches(presented: string | null, secret: string): boolean {
-  if (!presented) return false;
-  const a = Buffer.from(presented);
-  const b = Buffer.from(secret);
-  // Constant-time compare so response timing can't be used to guess the secret byte by byte.
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
 // Lidarr Connect → Webhook target. On import events, rescan the library so
 // new downloads show up in Spotless automatically.
 export async function POST(req: NextRequest) {
@@ -43,7 +35,10 @@ export async function POST(req: NextRequest) {
   const secret = process.env.LIDARR_WEBHOOK_SECRET;
   if (secret) {
     const presented = req.headers.get('x-webhook-token') ?? req.nextUrl.searchParams.get('token');
-    if (!tokenMatches(presented, secret)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    // Constant-time compare so response timing can't be used to guess the secret byte by byte.
+    if (!presented || !safeEqual(presented, secret)) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
   }
 
   const body: unknown = await req.json().catch(() => null);
