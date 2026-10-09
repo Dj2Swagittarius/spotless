@@ -81,5 +81,7 @@ Versions follow [SemVer](https://semver.org/): patch for fixes, minor for featur
 2. On a clean `main` checkout run `npm run release -- minor` (or `patch`, `major`, or an explicit `1.2.3`).
    Add `--dry-run` to see what it would do. It bumps `package.json`, dates the changelog section, commits
    `Release vX.Y.Z` and creates the annotated tag `vX.Y.Z`.
-3. Push with `git push origin main --follow-tags`. CI then builds the image tagged `:X.Y.Z`, `:X.Y` and `:latest`,
-   and the release workflow creates a GitHub Release with that changelog section as its notes.
+3. Push with `git push origin main --follow-tags`. CI tests the tag, publishes the image as `:X.Y.Z` and `:X.Y`
+   (`:latest` follows `main`, never a tag), and only then creates a GitHub Release with that changelog section
+   as its notes. A version with a suffix such as `1.3.0-beta.1` is published as a pre-release; bumping it with
+   `patch` afterwards finalises it to `1.3.0`.

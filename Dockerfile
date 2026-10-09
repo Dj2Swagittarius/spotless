@@ -1,27 +1,29 @@
 # ---- build stage ----
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
-# Set by CI (docker.yml) to the commit being built; shown in Settings → About and /api/health.
-ARG GIT_SHA=
-ENV GIT_SHA=$GIT_SHA
 
 COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+# Set by CI (docker.yml) to the commit being built; shown in Settings → About and /api/health.
+# Declared right before the build so a new commit does not invalidate the npm ci layer above.
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
 RUN npm run build
 
 # ---- runtime stage ----
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
-ARG GIT_SHA=
-ENV GIT_SHA=$GIT_SHA
 
 # ffmpeg powers on-the-fly transcoding for Subsonic mobile clients;
 # gosu lets the entrypoint drop from root to the node user after fixing /data ownership.
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg gosu && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
+# Runtime copy of the build commit (after apt, so that layer stays cached across commits).
+ARG GIT_SHA=
+ENV GIT_SHA=$GIT_SHA
 ENV MUSIC_DIR=/music
 ENV MUSIC_WRITE_DIR=/music-write
 ENV DATA_DIR=/data
