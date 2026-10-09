@@ -49,6 +49,14 @@ const OPEN_SUBSONIC_EXTENSIONS = [
   { name: 'transcodeOffset', versions: [1] },
 ];
 
+// Subsonic form bodies are a handful of short fields. The body is read before authentication
+// (clients may send u/p in it), so cap it instead of buffering whatever an anonymous client posts.
+const MAX_FORM_BYTES = 64 * 1024;
+
+// scrobble `time` is milliseconds since 1970 (Subsonic spec). A client that sends seconds lands in
+// January 1970, so anything before 2000-01-01 is treated as "no usable time" rather than stored.
+const MIN_SCROBBLE_MS = Date.UTC(2000, 0, 1);
+
 // q is the query string merged with any POST form body, so handlers never read req.nextUrl directly
 type Ctx = { req: NextRequest; user: SubUser; q: URLSearchParams };
 
@@ -73,6 +81,23 @@ function num(q: URLSearchParams, key: string, fallback: number, max = 500): numb
   const v = Math.floor(Number(raw));
   if (!Number.isFinite(v) || v < 0) return fallback;
   return Math.min(v, max);
+}
+
+/**
+ * Paging offset: anything that is not a non-negative integer (1.5, 1e999, text, absent) → 0.
+ * SQLite rejects a fractional or infinite OFFSET outright, so this must never reach the query.
+ */
+function offsetOf(q: URLSearchParams, key: string): number {
+  const v = Math.floor(Number(q.get(key)));
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/**
+ * Subsonic error 10 = required parameter missing; 70 (not found) stays for a value that is
+ * present but does not resolve. Clients use the distinction to tell a client bug from a stale id.
+ */
+function missing(ctx: Ctx, key = 'id'): Response | null {
+  return ctx.q.get(key) ? null : fail(ctx, 10, `${key} required`);
 }
 
 function indexLetter(name: string): string {
@@ -132,12 +157,17 @@ function like(term: string): string {
 // ---------- media endpoints (non-envelope responses) ----------
 
 async function streamTrack(ctx: Ctx, download = false): Promise<Response> {
+  const absent = missing(ctx);
+  if (absent) return absent;
   const sid = parseSid(ctx.q.get('id'));
   if (!sid || sid.kind !== 'track') return fail(ctx, 70, 'song not found');
   const row = db().prepare('SELECT path, duration FROM tracks WHERE id = ?').get(sid.id) as
     | { path: string; duration: number }
     | undefined;
-  if (!row || !fs.existsSync(row.path)) return fail(ctx, 70, 'song not found');
+  if (!row) return fail(ctx, 70, 'song not found');
+  // async stat, like /api/stream: a missing file on a slow network share must not block the event loop
+  const st = await fs.promises.stat(row.path).catch(() => null);
+  if (!st?.isFile()) return fail(ctx, 70, 'song not found');
   // OpenSubsonic transcodeOffset: seconds into the track to start a transcoded stream at
   const timeOffset = Number(ctx.q.get('timeOffset'));
   return serveTrack(ctx.req, row.path, {
@@ -152,6 +182,8 @@ async function streamTrack(ctx: Ctx, download = false): Promise<Response> {
 }
 
 function coverArt(ctx: Ctx): Response {
+  const absent = missing(ctx);
+  if (absent) return absent;
   const sid = parseSid(ctx.q.get('id'));
   if (!sid) return fail(ctx, 70, 'cover art not found');
   let file: string | null = null;
@@ -178,22 +210,20 @@ function coverArt(ctx: Ctx): Response {
 
 function albumList(ctx: CtxWithView): Response {
   const type = ctx.q.get('type') ?? 'alphabeticalByName';
-  const size = num(ctx.q, 'size', 10);
-  const offset = Number(ctx.q.get('offset')) || 0;
   let order = 'ORDER BY al.name COLLATE NOCASE';
   let where = '1=1';
-  const params: Record<string, unknown> = {};
+  const params: Record<string, unknown> = { limit: num(ctx.q, 'size', 10), offset: offsetOf(ctx.q, 'offset') };
   if (type === 'random') order = 'ORDER BY RANDOM()';
   else if (type === 'newest') order = 'ORDER BY created DESC';
   else if (type === 'alphabeticalByArtist') order = 'ORDER BY artist COLLATE NOCASE, al.name COLLATE NOCASE';
-  else if (type === 'recent') {
-    // per-profile, like the web app's recently played
+  else if (type === 'recent' || type === 'frequent') {
+    // Per-profile, like the web app's recently played: only albums this user has actually played,
+    // otherwise a thin history pages the whole library onto the client's "recent" shelf.
+    where = 'EXISTS (SELECT 1 FROM history h JOIN tracks ht ON ht.id = h.track_id WHERE ht.album_id = al.id AND h.user_id = @uid)';
     order =
-      'ORDER BY (SELECT MAX(h.played_at) FROM history h JOIN tracks ht ON ht.id = h.track_id WHERE ht.album_id = al.id AND h.user_id = @uid) DESC';
-    params.uid = ctx.user.id;
-  } else if (type === 'frequent') {
-    order =
-      'ORDER BY (SELECT COUNT(*) FROM history h JOIN tracks ht ON ht.id = h.track_id WHERE ht.album_id = al.id AND h.user_id = @uid) DESC';
+      type === 'recent'
+        ? 'ORDER BY (SELECT MAX(h.played_at) FROM history h JOIN tracks ht ON ht.id = h.track_id WHERE ht.album_id = al.id AND h.user_id = @uid) DESC'
+        : 'ORDER BY (SELECT COUNT(*) FROM history h JOIN tracks ht ON ht.id = h.track_id WHERE ht.album_id = al.id AND h.user_id = @uid) DESC';
     params.uid = ctx.user.id;
   } else if (type === 'byYear') {
     const from = Number(ctx.q.get('fromYear')) || 0;
@@ -209,7 +239,7 @@ function albumList(ctx: CtxWithView): Response {
     where = '0=1'; // no album-level stars in Spotless
   }
   const rows = db()
-    .prepare(`${ALBUM_SQL} WHERE ${where} GROUP BY al.id ${order} LIMIT ${size} OFFSET ${offset}`)
+    .prepare(`${ALBUM_SQL} WHERE ${where} GROUP BY al.id ${order} LIMIT @limit OFFSET @offset`)
     .all(params) as AlbumRow[];
   const key = ctx.view === 'getAlbumList' ? 'albumList' : 'albumList2';
   return ok(ctx, { [key]: { album: rows.map(albumJson) } });
@@ -217,12 +247,11 @@ function albumList(ctx: CtxWithView): Response {
 
 function search(ctx: CtxWithView): Response {
   const query = (ctx.q.get('query') ?? '').replace(/^"|"$/g, '').trim();
-  const artistCount = num(ctx.q, 'artistCount', 20);
-  const artistOffset = Number(ctx.q.get('artistOffset')) || 0;
-  const albumCount = num(ctx.q, 'albumCount', 20);
-  const albumOffset = Number(ctx.q.get('albumOffset')) || 0;
-  const songCount = num(ctx.q, 'songCount', 20);
-  const songOffset = Number(ctx.q.get('songOffset')) || 0;
+  // Each section pages independently; counts and offsets are bound, never spliced into the SQL.
+  const page = (countKey: string, offsetKey: string) => ({
+    limit: num(ctx.q, countKey, 20),
+    offset: offsetOf(ctx.q, offsetKey),
+  });
 
   // empty query = full library listing (Symfonium and friends page through this for offline sync)
   const artistWhere = query ? 'WHERE ar.name LIKE @q' : '';
@@ -234,13 +263,19 @@ function search(ctx: CtxWithView): Response {
     .prepare(
       `SELECT ar.id, ar.name, COUNT(DISTINCT al.id) AS albumCount
        FROM artists ar LEFT JOIN albums al ON al.artist_id = ar.id ${artistWhere}
-       GROUP BY ar.id ORDER BY ar.name COLLATE NOCASE LIMIT ${artistCount} OFFSET ${artistOffset}`
+       GROUP BY ar.id ORDER BY ar.name COLLATE NOCASE LIMIT @limit OFFSET @offset`
     )
-    .all(params) as ArtistRow[];
+    .all({ ...params, ...page('artistCount', 'artistOffset') }) as ArtistRow[];
   const albums = db()
-    .prepare(`${ALBUM_SQL} ${albumWhere} GROUP BY al.id ORDER BY al.name COLLATE NOCASE LIMIT ${albumCount} OFFSET ${albumOffset}`)
-    .all(params) as AlbumRow[];
-  const songs = tracksBy(songWhere, params, ctx.user.id, 'ORDER BY t.title COLLATE NOCASE', `LIMIT ${songCount} OFFSET ${songOffset}`);
+    .prepare(`${ALBUM_SQL} ${albumWhere} GROUP BY al.id ORDER BY al.name COLLATE NOCASE LIMIT @limit OFFSET @offset`)
+    .all({ ...params, ...page('albumCount', 'albumOffset') }) as AlbumRow[];
+  const songs = tracksBy(
+    songWhere,
+    { ...params, ...page('songCount', 'songOffset') },
+    ctx.user.id,
+    'ORDER BY t.title COLLATE NOCASE',
+    'LIMIT @limit OFFSET @offset'
+  );
 
   const key = ctx.view === 'search2' ? 'searchResult2' : 'searchResult3';
   return ok(ctx, {
@@ -253,6 +288,8 @@ function search(ctx: CtxWithView): Response {
  * artist or in the same genre as the seed (song, album or artist id), never the seed song itself.
  */
 function similarSongs(ctx: CtxWithView): Response {
+  const absent = missing(ctx);
+  if (absent) return absent;
   const sid = parseSid(ctx.q.get('id'));
   if (!sid || sid.kind === 'playlist') return fail(ctx, 70, 'not found');
   const count = num(ctx.q, 'count', 50);
@@ -294,6 +331,8 @@ function similarSongs(ctx: CtxWithView): Response {
 // ---------- playlists ----------
 
 function ownPlaylist(ctx: Ctx, sidParam: string): { id: number } | Response {
+  const absent = missing(ctx, sidParam);
+  if (absent) return absent;
   const sid = parseSid(ctx.q.get(sidParam));
   if (!sid || sid.kind !== 'playlist') return fail(ctx, 70, 'playlist not found');
   const row = db().prepare('SELECT id, user_id FROM playlists WHERE id = ?').get(sid.id) as
@@ -337,6 +376,8 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   // Folder-style browsing: getIndexes lists artists as 'ar-N', whose children are albums 'al-N',
   // whose children are songs. Same serializers as the ID3 endpoints so ids round-trip exactly.
   getMusicDirectory: (ctx) => {
+    const absent = missing(ctx);
+    if (absent) return absent;
     const sid = parseSid(ctx.q.get('id'));
     if (sid?.kind === 'artist') {
       const artist = db().prepare('SELECT id, name FROM artists WHERE id = ?').get(sid.id) as
@@ -369,6 +410,8 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   },
 
   getArtist: (ctx) => {
+    const absent = missing(ctx);
+    if (absent) return absent;
     const sid = parseSid(ctx.q.get('id'));
     if (!sid || sid.kind !== 'artist') return fail(ctx, 70, 'artist not found');
     const artist = db()
@@ -385,6 +428,8 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   },
 
   getAlbum: (ctx) => {
+    const absent = missing(ctx);
+    if (absent) return absent;
     const sid = parseSid(ctx.q.get('id'));
     if (!sid || sid.kind !== 'album') return fail(ctx, 70, 'album not found');
     const album = db().prepare(`${ALBUM_SQL} WHERE al.id = ? GROUP BY al.id`).get(sid.id) as AlbumRow | undefined;
@@ -394,6 +439,8 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   },
 
   getSong: (ctx) => {
+    const absent = missing(ctx);
+    if (absent) return absent;
     const sid = parseSid(ctx.q.get('id'));
     if (!sid || sid.kind !== 'track') return fail(ctx, 70, 'song not found');
     const song = tracksBy('t.id = @id', { id: sid.id }, ctx.user.id)[0];
@@ -439,9 +486,13 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   getSimilarSongs2: similarSongs,
 
   getSongsByGenre: (ctx) => {
-    const size = num(ctx.q, 'count', 10);
-    const offset = Number(ctx.q.get('offset')) || 0;
-    const songs = tracksBy('t.genre = @g', { g: ctx.q.get('genre') ?? '' }, ctx.user.id, 'ORDER BY t.title', `LIMIT ${size} OFFSET ${offset}`);
+    const songs = tracksBy(
+      't.genre = @g',
+      { g: ctx.q.get('genre') ?? '', limit: num(ctx.q, 'count', 10), offset: offsetOf(ctx.q, 'offset') },
+      ctx.user.id,
+      'ORDER BY t.title',
+      'LIMIT @limit OFFSET @offset'
+    );
     return ok(ctx, { songsByGenre: { song: songs.map(songJson) } });
   },
 
@@ -498,10 +549,10 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   },
 
   getLyricsBySongId: async (ctx) => {
-    const rawId = ctx.q.get('id');
-    if (!rawId) return fail(ctx, 10, 'id required');
+    const absent = missing(ctx);
+    if (absent) return absent;
 
-    const sid = parseSid(rawId);
+    const sid = parseSid(ctx.q.get('id'));
     if (!sid || sid.kind !== 'track') return fail(ctx, 70, 'song not found');
 
     const lyrics = await resolveLyrics(sid.id);
@@ -532,6 +583,8 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
   },
 
   scrobble: (ctx) => {
+    const absent = missing(ctx);
+    if (absent) return absent;
     const submission = ctx.q.get('submission') !== 'false';
     const times = ctx.q.getAll('time'); // ms epoch, parallel to id per Subsonic spec
     ctx.q.getAll('id').forEach((raw, i) => {
@@ -539,9 +592,11 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
       if (sid?.kind !== 'track') return;
       if (submission) {
         // Offline-cached plays arrive late with their original time; keep it so history and
-        // Last.fm agree. Anything more than an hour ahead of us is a bad clock: use now.
+        // Last.fm agree. Before MIN_SCROBBLE_MS (seconds instead of ms, or garbage) or more than
+        // an hour ahead of us (bad clock) it is unusable: use now, as the web app does.
         const timeMs = Number(times[i]);
-        const playedMs = Number.isFinite(timeMs) && timeMs > 0 && timeMs <= Date.now() + 3_600_000 ? timeMs : null;
+        const playedMs =
+          Number.isFinite(timeMs) && timeMs >= MIN_SCROBBLE_MS && timeMs <= Date.now() + 3_600_000 ? timeMs : null;
         if (playedMs === null) {
           db().prepare('INSERT INTO history (track_id, user_id) VALUES (?, ?)').run(sid.id, ctx.user.id);
         } else {
@@ -729,6 +784,8 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
 
   deleteInternetRadioStation: (ctx) => {
     if (ctx.user.id !== ADMIN_USER_ID) return fail(ctx, 50, 'admin only');
+    const absent = missing(ctx);
+    if (absent) return absent;
     const id = Number((ctx.q.get('id') ?? '').replace(/^ir-/, ''));
     if (!id || !deleteStation(id)) return fail(ctx, 70, 'station not found');
     return ok(ctx);
@@ -756,17 +813,44 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
 };
 
 /**
+ * Read a form body of at most MAX_FORM_BYTES. A declared Content-Length over the cap is refused
+ * without reading; a chunked body is read with a byte budget and cancelled once it is exceeded.
+ * Returns null when the body is too large.
+ */
+async function readFormBody(req: NextRequest): Promise<string | null> {
+  if (Number(req.headers.get('content-length')) > MAX_FORM_BYTES) return null;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_FORM_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
  * Query string merged with a POST form body. Subsonic clients may send every parameter (auth,
  * ids, format) as application/x-www-form-urlencoded instead of in the URL; a key present in both
- * is taken from the body, including all values of a repeated key such as id=.
+ * is taken from the body, including all values of a repeated key such as id=. Other content types
+ * are never read. Returns null for a body over MAX_FORM_BYTES so the caller can refuse it.
  */
-async function requestParams(req: NextRequest): Promise<URLSearchParams> {
+async function requestParams(req: NextRequest): Promise<URLSearchParams | null> {
   const merged = new URLSearchParams(req.nextUrl.searchParams);
   const type = (req.headers.get('content-type') ?? '').toLowerCase();
   if (req.method !== 'POST' || !type.startsWith('application/x-www-form-urlencoded')) return merged;
   let body: URLSearchParams;
   try {
-    body = new URLSearchParams(await req.text());
+    const text = await readFormBody(req);
+    if (text === null) return null;
+    body = new URLSearchParams(text);
   } catch {
     return merged; // unreadable body: fall back to the query string alone
   }
@@ -779,6 +863,11 @@ async function handle(req: NextRequest, { params }: { params: Promise<{ view: st
   const { view: parts } = await params;
   const view = (parts?.[0] ?? '').replace(/\.view$/, '');
   const q = await requestParams(req);
+  if (q === null) {
+    // Subsonic envelope (so clients still parse it) with the HTTP status proxies and logs expect.
+    const res = subsonicError(req, 0, 'request body too large', req.nextUrl.searchParams);
+    return new Response(res.body, { status: 413, headers: res.headers });
+  }
 
   // OpenSubsonic requires extension discovery to be publicly accessible.
   if (view === 'getOpenSubsonicExtensions') {
