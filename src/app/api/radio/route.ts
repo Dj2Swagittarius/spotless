@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
     .filter(Number.isInteger)
     .slice(0, 500);
   const requested = Number(req.nextUrl.searchParams.get('limit'));
-  const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, 30) : 15;
+  // floor before binding: SQLite rejects a fractional LIMIT with a datatype mismatch
+  const limit = Number.isFinite(requested) && requested >= 1 ? Math.min(Math.floor(requested), 30) : 15;
 
   const db = getDb();
   const seed = Number.isInteger(seedId)
