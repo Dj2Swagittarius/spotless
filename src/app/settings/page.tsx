@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import FolderPicker from '@/components/FolderPicker';
 import DjSettings from '@/components/DjSettings';
+import ThemePicker from '@/components/ThemePicker';
 import { XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
 import { loadEq, saveEq, EQ_PRESETS, EQ_FREQS, EQ_MIN, EQ_MAX, type EqState } from '@/lib/eq';
@@ -572,6 +573,14 @@ export default function SettingsPage() {
             Switch profile
           </button>
         </div>
+      </Section>
+
+      <Section title="Appearance">
+        <p className="mb-3 text-sm text-subdued">
+          Pick a theme for this device. <span className="text-white">Remix</span> themes go further than color — new
+          type, corners and window chrome.
+        </p>
+        <ThemePicker />
       </Section>
 
       <Section title="Mobile apps">

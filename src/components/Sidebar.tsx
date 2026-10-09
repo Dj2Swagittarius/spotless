@@ -71,7 +71,7 @@ export default function Sidebar() {
       {creating && (
         <PromptModal title="Create playlist" placeholder="Playlist name" submitLabel="Create" onSubmit={createPlaylist} onClose={() => setCreating(false)} />
       )}
-      <nav className="rounded-lg bg-base px-2 py-3">
+      <nav className="app-panel rounded-lg bg-base px-2 py-3">
         <Link href="/" className={navClass(pathname === '/')}>
           <HomeIcon size={24} /> Home
         </Link>
@@ -97,7 +97,7 @@ export default function Sidebar() {
           <GearIcon size={24} /> Settings
         </Link>
       </nav>
-      <div className="flex min-h-0 flex-1 flex-col rounded-lg bg-base">
+      <div className="app-panel flex min-h-0 flex-1 flex-col rounded-lg bg-base">
         <div className="flex items-center justify-between px-4 pb-1 pt-3">
           <Link href="/library" className={`flex items-center gap-3 font-bold ${pathname === '/library' ? 'text-white' : 'text-subdued hover:text-white'}`}>
             <LibraryIcon size={24} /> Your Library
