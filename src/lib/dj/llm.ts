@@ -159,6 +159,9 @@ export async function complete(
       body.temperature = 0.8;
     }
     if (withFormat && responseFormat) body.response_format = responseFormat;
+    // a DJ reply doesn't need a chain of thought: on LM Studio, thinking models (Gemma 4, Qwen 3)
+    // otherwise spend seconds to minutes reasoning before the first word, or the whole token budget
+    if (withFormat && p.id === 'lmstudio') body.reasoning_effort = 'none';
     const data = await postJson(`${baseUrl}/chat/completions`, body, headers, timeout);
     const msg = data?.choices?.[0]?.message;
     return String(msg?.content ?? '');
