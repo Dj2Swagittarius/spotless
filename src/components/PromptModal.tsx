@@ -31,7 +31,7 @@ export default function PromptModal({ title, placeholder, initial = '', submitLa
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-90 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
       <div className="w-full max-w-sm rounded-lg bg-elevated p-5 shadow-dialog" onClick={(e) => e.stopPropagation()}>
         <h2 className="mb-3 text-lg font-bold">{title}</h2>
         <input
@@ -42,7 +42,7 @@ export default function PromptModal({ title, placeholder, initial = '', submitLa
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder={placeholder}
           maxLength={80}
-          className="mb-4 w-full rounded bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued focus:outline-none focus:shadow-insetBorder"
+          className="mb-4 w-full rounded-sm bg-highlight px-3 py-2 text-sm text-white placeholder:text-subdued focus:outline-hidden focus:shadow-insetBorder"
         />
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="rounded-full px-4 py-1.5 text-sm font-medium text-subdued hover:text-white">

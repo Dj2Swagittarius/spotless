@@ -55,7 +55,7 @@ export default function ProfilePicker({ onSelected }: { onSelected: (u: User) =>
   const isBootstrap = Boolean(selected && selected.id === 1 && !selected.passwordSet && bootstrapAllowed);
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-8 overflow-y-auto bg-base p-6">
+    <div className="fixed inset-0 z-100 flex flex-col items-center justify-center gap-8 overflow-y-auto bg-base p-6">
       <div className="text-center">
         <div className="text-3xl font-extrabold tracking-tight">
           Who&apos;s listening<span className="text-accent">?</span>
@@ -68,7 +68,7 @@ export default function ProfilePicker({ onSelected }: { onSelected: (u: User) =>
           Array.from({ length: 2 }, (_, i) => (
             <div key={i} className="flex w-24 animate-pulse flex-col items-center gap-2" aria-hidden>
               <div className="h-20 w-20 rounded-full bg-highlight" />
-              <div className="h-3 w-14 rounded bg-highlight" />
+              <div className="h-3 w-14 rounded-sm bg-highlight" />
             </div>
           ))}
         {users?.map((u) => (
@@ -106,7 +106,7 @@ export default function ProfilePicker({ onSelected }: { onSelected: (u: User) =>
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={isBootstrap ? 'Create admin password' : 'Password'}
                 maxLength={128}
-                className="w-full rounded bg-highlight px-3 py-2.5 text-sm text-white placeholder:text-subdued outline-none focus:shadow-insetBorder"
+                className="w-full rounded-sm bg-highlight px-3 py-2.5 text-sm text-white placeholder:text-subdued outline-hidden focus:shadow-insetBorder"
               />
               {isBootstrap && <p className="text-xs text-subdued">A PIN is fine on a home network; use a long passphrase if Spotless is reachable from the internet.</p>}
               <button type="submit" disabled={busy || !password} className="btn-primary w-full">

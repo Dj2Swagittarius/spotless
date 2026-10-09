@@ -71,7 +71,7 @@ export default function HomePage() {
   if (status === 'loading' || sections === null)
     return (
       <div className="space-y-8">
-        <div className="h-9 w-64 animate-pulse rounded bg-elevated" />
+        <div className="h-9 w-64 animate-pulse rounded-sm bg-elevated" />
         <RowListSkeleton count={6} />
         <CardGridSkeleton count={6} />
       </div>
@@ -106,7 +106,7 @@ export default function HomePage() {
             // role=button tile made Enter on the menu also start playback, and Space did nothing
             <div
               key={t.id}
-              className="group flex items-center overflow-hidden rounded bg-white/10 transition-colors hover:bg-white/20"
+              className="group flex items-center overflow-hidden rounded-sm bg-white/10 transition-colors hover:bg-white/20"
             >
               <button
                 type="button"
@@ -143,15 +143,15 @@ export default function HomePage() {
           <h2 className="mb-4 text-2xl font-bold">{s.title}</h2>
           <div className="grid grid-cols-1 gap-1 lg:grid-cols-2">
             {s.tracks!.map((t, i) => (
-              <div key={t.id} className="group flex items-center gap-3 rounded p-2 hover:bg-white/10">
+              <div key={t.id} className="group flex items-center gap-3 rounded-sm p-2 hover:bg-white/10">
                 <button
                   type="button"
                   onClick={() => playQueue(s.tracks!, i)}
                   aria-label={`Play ${t.title}`}
-                  className="flex min-w-0 flex-1 items-center gap-3 rounded text-left"
+                  className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/api/artwork/${t.albumId}`} alt="" className="h-12 w-12 rounded object-cover" loading="lazy" decoding="async" />
+                  <img src={`/api/artwork/${t.albumId}`} alt="" className="h-12 w-12 rounded-sm object-cover" loading="lazy" decoding="async" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{t.title}</span>
                     <span className="block truncate text-sm text-subdued">{t.artist}</span>

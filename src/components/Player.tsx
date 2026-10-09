@@ -816,10 +816,10 @@ export default function Player() {
       <audio ref={audioBRef} {...audioProps} />
 
       {showLyrics && track && (
-        <div className="fixed inset-x-0 bottom-0 top-14 z-[80] overflow-y-auto bg-black/95 pb-64 md:bottom-20 md:left-64 md:top-0 md:z-30 md:pb-0">
-          <div className="sticky top-0 flex items-center gap-3 bg-black/90 px-6 py-3 backdrop-blur">
+        <div className="fixed inset-x-0 bottom-0 top-14 z-80 overflow-y-auto bg-black/95 pb-64 md:bottom-20 md:left-64 md:top-0 md:z-30 md:pb-0">
+          <div className="sticky top-0 flex items-center gap-3 bg-black/90 px-6 py-3 backdrop-blur-sm">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={`/api/artwork/${track.albumId}`} alt="" className="h-10 w-10 rounded object-cover" />
+            <img src={`/api/artwork/${track.albumId}`} alt="" className="h-10 w-10 rounded-sm object-cover" />
             <div className="min-w-0 flex-1">
               <div className="truncate font-bold">{track.title}</div>
               <div className="truncate text-sm text-subdued">{track.artist}</div>
@@ -835,8 +835,8 @@ export default function Player() {
       {showQueue && (
         <>
           {/* tap anywhere outside to close */}
-          <div className="fixed inset-0 z-[84] bg-black/40 md:z-40" onClick={() => setShowQueue(false)} aria-hidden />
-          <div className="fixed inset-x-2 bottom-56 z-[85] max-h-[55vh] overflow-y-auto rounded-lg border border-highlight bg-elevated p-3 shadow-dialog md:inset-x-auto md:bottom-24 md:right-2 md:z-50 md:w-80">
+          <div className="fixed inset-0 z-84 bg-black/40 md:z-40" onClick={() => setShowQueue(false)} aria-hidden />
+          <div className="fixed inset-x-2 bottom-56 z-85 max-h-[55vh] overflow-y-auto rounded-lg border border-highlight bg-elevated p-3 shadow-dialog md:inset-x-auto md:bottom-24 md:right-2 md:z-50 md:w-80">
             <div className="mb-2 flex items-center justify-between">
               <span className="font-bold">Queue</span>
               <div className="flex items-center gap-2">
@@ -862,11 +862,11 @@ export default function Player() {
                 if (dragFrom.current !== null) moveInQueue(dragFrom.current, i);
                 dragFrom.current = null;
               }}
-              className={`flex w-full cursor-grab items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-highlight active:cursor-grabbing ${i === index ? 'text-accent' : ''}`}
+              className={`flex w-full cursor-grab items-center gap-3 rounded-sm px-2 py-1.5 text-left hover:bg-highlight active:cursor-grabbing ${i === index ? 'text-accent' : ''}`}
             >
               <button onClick={() => jumpTo(i)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/artwork/${t.albumId}`} alt="" className="h-9 w-9 rounded object-cover" />
+                <img src={`/api/artwork/${t.albumId}`} alt="" className="h-9 w-9 rounded-sm object-cover" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{t.title}</span>
                   <span className="block truncate text-xs text-subdued">{t.artist}</span>
@@ -890,7 +890,7 @@ export default function Player() {
             aria-label="Expand player"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={`/api/artwork/${track.albumId}`} alt="" className="h-10 w-10 rounded object-cover" />
+            <img src={`/api/artwork/${track.albumId}`} alt="" className="h-10 w-10 rounded-sm object-cover" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{track.title}</div>
               <div className="truncate text-xs text-subdued">{track.artist}</div>
@@ -926,7 +926,7 @@ export default function Player() {
 
         {/* mobile: full-screen now playing */}
         {track && expanded && (
-          <div className="fixed inset-x-0 top-0 bottom-14 z-[70] flex flex-col bg-gradient-to-b from-highlight to-base p-6 md:hidden">
+          <div className="fixed inset-x-0 top-0 bottom-14 z-70 flex flex-col bg-linear-to-b from-highlight to-base p-6 md:hidden">
             <div className="mb-4 flex items-center justify-between">
               <button
                 onClick={() => setExpanded(false)}
@@ -935,7 +935,7 @@ export default function Player() {
               >
                 <ChevronDownIcon size={30} />
               </button>
-              <span className="text-xs font-bold uppercase tracking-[0.1em] text-subdued">Now playing</span>
+              <span className="text-xs font-bold uppercase tracking-widest text-subdued">Now playing</span>
               <button
                 onClick={() => setShowQueue((v) => !v)}
                 className={`rounded-full p-2 ${showQueue ? 'text-accent' : 'text-subdued'}`}
@@ -986,7 +986,7 @@ export default function Player() {
               </div>
 
               {isStation ? (
-                <div className="flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-[0.1em] text-accent">
+                <div className="flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-widest text-accent">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> Live
                 </div>
               ) : (
@@ -1077,7 +1077,7 @@ export default function Player() {
             {track && (
               <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/artwork/${track.albumId}`} alt="" className="h-12 w-12 rounded object-cover" />
+                <img src={`/api/artwork/${track.albumId}`} alt="" className="h-12 w-12 rounded-sm object-cover" />
                 <div className="min-w-0">
                   {isStation ? (
                     <>
@@ -1148,7 +1148,7 @@ export default function Player() {
             </div>
             <div className="hidden w-full max-w-xl items-center gap-2 md:flex">
               {isStation ? (
-                <div className="flex flex-1 items-center justify-center gap-2 text-xs font-bold uppercase tracking-[0.1em] text-accent">
+                <div className="flex flex-1 items-center justify-center gap-2 text-xs font-bold uppercase tracking-widest text-accent">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" /> Live
                 </div>
               ) : (

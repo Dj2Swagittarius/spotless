@@ -48,13 +48,13 @@ interface TrackRowProps {
 function TrackRow({ t, rowKey, playing, dl, lidarrConfigured, onPreview, onGrab }: TrackRowProps) {
   const grabLabel = t.album ? `Download "${t.album}" via Lidarr` : `Download ${t.artist} via Lidarr`;
   return (
-    <div className="flex items-center gap-3 rounded p-1.5 hover:bg-white/5">
+    <div className="flex items-center gap-3 rounded-sm p-1.5 hover:bg-white/5">
       <span className="w-6 shrink-0 text-right text-sm tabular-nums text-subdued">{t.rank}</span>
       {t.art ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={t.art} alt="" className="h-10 w-10 rounded object-cover" loading="lazy" decoding="async" />
+        <img src={t.art} alt="" className="h-10 w-10 rounded-sm object-cover" loading="lazy" decoding="async" />
       ) : (
-        <div className="h-10 w-10 rounded bg-highlight" />
+        <div className="h-10 w-10 rounded-sm bg-highlight" />
       )}
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{t.title}</div>
@@ -183,7 +183,7 @@ export default function TrendingPage() {
       ) : (
         <>
           {data.error && (
-            <div role="status" className="rounded bg-elevated px-3 py-2 text-sm text-subdued">
+            <div role="status" className="rounded-sm bg-elevated px-3 py-2 text-sm text-subdued">
               Some charts could not be loaded; this view may be incomplete.
             </div>
           )}
@@ -222,7 +222,7 @@ export default function TrendingPage() {
             {chartLoading && data.chart.length === 0 ? (
               <RowListSkeleton count={6} />
             ) : data.chart.length === 0 ? (
-              <div role="status" className="rounded bg-elevated px-3 py-2 text-sm text-subdued">
+              <div role="status" className="rounded-sm bg-elevated px-3 py-2 text-sm text-subdued">
                 The {countryName} chart is unavailable right now; try another region or check back later.
               </div>
             ) : (
@@ -264,9 +264,9 @@ export default function TrendingPage() {
                           <div key={key} className="w-36 shrink-0 rounded-lg bg-elevated p-2">
                             {t.art ? (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img src={t.art} alt="" className="mb-2 aspect-square w-full rounded object-cover" loading="lazy" decoding="async" />
+                              <img src={t.art} alt="" className="mb-2 aspect-square w-full rounded-sm object-cover" loading="lazy" decoding="async" />
                             ) : (
-                              <div className="mb-2 aspect-square w-full rounded bg-highlight" />
+                              <div className="mb-2 aspect-square w-full rounded-sm bg-highlight" />
                             )}
                             <div className="truncate text-sm font-semibold" title={t.title}>{t.title}</div>
                             <div className="mb-1.5 truncate text-xs text-subdued">{t.artist}</div>
@@ -307,7 +307,7 @@ export default function TrendingPage() {
       )}
 
       {drawerOpen && data && (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/70 md:items-center" onClick={() => setDrawerOpen(false)}>
+        <div className="fixed inset-0 z-90 flex items-end justify-center bg-black/70 md:items-center" onClick={() => setDrawerOpen(false)}>
           <div
             role="dialog"
             aria-label="Chart region"
@@ -322,7 +322,7 @@ export default function TrendingPage() {
                   setCountry(c.code);
                   setDrawerOpen(false);
                 }}
-                className={`block w-full rounded px-3 py-2.5 text-left text-sm hover:bg-highlight ${c.code === country ? 'font-bold text-accent' : ''}`}
+                className={`block w-full rounded-sm px-3 py-2.5 text-left text-sm hover:bg-highlight ${c.code === country ? 'font-bold text-accent' : ''}`}
               >
                 {c.name}
               </button>

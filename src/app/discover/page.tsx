@@ -237,7 +237,7 @@ export default function DiscoverPage() {
       </div>
 
       {spotifyError && (
-        <div className="rounded bg-negative/10 px-3 py-2 text-sm text-negative">Spotify connect failed: {spotifyError}</div>
+        <div className="rounded-sm bg-negative/10 px-3 py-2 text-sm text-negative">Spotify connect failed: {spotifyError}</div>
       )}
 
       {isAdmin && requests.some((r) => r.status === 'pending') && (
@@ -317,9 +317,9 @@ export default function DiscoverPage() {
                     <XIcon size={12} />
                   </button>
                 </div>
-                <div className="h-1 rounded bg-highlight">
+                <div className="h-1 rounded-sm bg-highlight">
                   <div
-                    className={`h-full rounded ${d.state === 'importFailed' ? 'bg-negative' : 'bg-accent'}`}
+                    className={`h-full rounded-sm ${d.state === 'importFailed' ? 'bg-negative' : 'bg-accent'}`}
                     style={{ width: `${d.status === 'completed' ? 100 : d.pct}%` }}
                   />
                 </div>
@@ -340,9 +340,9 @@ export default function DiscoverPage() {
               <div key={`${r.artist}-${r.title}`} className="w-40 shrink-0 rounded-lg bg-elevated p-3">
                 {r.cover ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={r.cover} alt="" className="mb-2 aspect-square w-full rounded object-cover" loading="lazy" decoding="async" />
+                  <img src={r.cover} alt="" className="mb-2 aspect-square w-full rounded-sm object-cover" loading="lazy" decoding="async" />
                 ) : (
-                  <div className="mb-2 aspect-square w-full rounded bg-highlight" />
+                  <div className="mb-2 aspect-square w-full rounded-sm bg-highlight" />
                 )}
                 <div className="truncate text-sm font-semibold" title={r.title}>{r.title}</div>
                 <div className="truncate text-xs text-subdued">{r.artist}</div>
@@ -433,12 +433,12 @@ export default function DiscoverPage() {
               const key = `gap|${g.artist}|${g.title}`;
               const st = dlState[key];
               return (
-                <div key={key} className="flex items-center gap-3 rounded p-1.5 hover:bg-highlight">
+                <div key={key} className="flex items-center gap-3 rounded-sm p-1.5 hover:bg-highlight">
                   {g.cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={g.cover} alt="" className="h-10 w-10 rounded object-cover" loading="lazy" decoding="async" />
+                    <img src={g.cover} alt="" className="h-10 w-10 rounded-sm object-cover" loading="lazy" decoding="async" />
                   ) : (
-                    <div className="h-10 w-10 rounded bg-highlight" />
+                    <div className="h-10 w-10 rounded-sm bg-highlight" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{g.title}</div>
@@ -535,12 +535,12 @@ export default function DiscoverPage() {
               )}
               <div className="space-y-1">
                 {a.topTracks.map((t) => (
-                  <div key={t.title} className="flex items-center gap-2 rounded p-1.5 hover:bg-highlight">
+                  <div key={t.title} className="flex items-center gap-2 rounded-sm p-1.5 hover:bg-highlight">
                     {t.cover ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={t.cover} alt="" className="h-9 w-9 rounded object-cover" loading="lazy" decoding="async" />
+                      <img src={t.cover} alt="" className="h-9 w-9 rounded-sm object-cover" loading="lazy" decoding="async" />
                     ) : (
-                      <div className="h-9 w-9 rounded bg-highlight" />
+                      <div className="h-9 w-9 rounded-sm bg-highlight" />
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{t.title}</div>

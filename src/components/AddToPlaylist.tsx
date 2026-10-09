@@ -131,7 +131,7 @@ export default function AddToPlaylist({ track, tracks, label, className, size = 
 
   if (list.length === 0) return null;
   const liked = single ? likes.ids.has(single.id) : false;
-  const item = 'flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-highlight';
+  const item = 'flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-highlight';
 
   return (
     <>
@@ -165,7 +165,7 @@ export default function AddToPlaylist({ track, tracks, label, className, size = 
             ref={menuRef}
             role="menu"
             style={{ position: 'fixed', ...pos, width: MENU_W, maxHeight: MENU_MAX_H }}
-            className="z-[95] overflow-y-auto rounded-md border border-highlight bg-elevated p-1 shadow-dialog"
+            className="z-95 overflow-y-auto rounded-md border border-highlight bg-elevated p-1 shadow-dialog"
             onClick={stop}
             onDoubleClick={stop}
             onMouseDown={stop}
@@ -212,7 +212,7 @@ export default function AddToPlaylist({ track, tracks, label, className, size = 
                 {playlists === null &&
                   [0, 1].map((n) => (
                     <div key={n} className="px-3 py-2" aria-hidden>
-                      <div className="h-3.5 w-2/3 animate-pulse rounded bg-highlight" />
+                      <div className="h-3.5 w-2/3 animate-pulse rounded-sm bg-highlight" />
                     </div>
                   ))}
                 {playlists?.map((pl) => (

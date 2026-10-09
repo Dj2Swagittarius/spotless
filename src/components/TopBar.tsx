@@ -74,7 +74,7 @@ export default function TopBar() {
             value={q}
             onChange={(e) => onChange(e.target.value)}
             placeholder="What do you want to play?"
-            className="w-full rounded-full bg-highlight py-2.5 pl-11 pr-4 text-sm font-medium placeholder-subdued outline-none focus:shadow-insetBorder"
+            className="w-full rounded-full bg-highlight py-2.5 pl-11 pr-4 text-sm font-medium placeholder-subdued outline-hidden focus:shadow-insetBorder"
           />
         </div>
       </div>
@@ -107,20 +107,20 @@ export default function TopBar() {
             <Link
               href="/settings"
               onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-3 rounded px-3 py-2 text-sm hover:bg-highlight"
+              className="flex items-center gap-3 rounded-sm px-3 py-2 text-sm hover:bg-highlight"
             >
               <GearIcon size={16} /> Settings
             </Link>
             <Link
               href="/users"
               onClick={() => setMenuOpen(false)}
-              className="flex items-center gap-3 rounded px-3 py-2 text-sm hover:bg-highlight"
+              className="flex items-center gap-3 rounded-sm px-3 py-2 text-sm hover:bg-highlight"
             >
               <span className="inline-block w-4 text-center">♙</span> {me?.isAdmin ? 'Manage profiles' : 'Password'}
             </Link>
             <button
               onClick={switchUser}
-              className="flex w-full items-center gap-3 rounded px-3 py-2 text-left text-sm hover:bg-highlight"
+              className="flex w-full items-center gap-3 rounded-sm px-3 py-2 text-left text-sm hover:bg-highlight"
             >
               <span className="inline-block w-4 text-center">⇄</span> Switch user / sign out
             </button>

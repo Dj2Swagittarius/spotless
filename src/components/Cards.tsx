@@ -24,7 +24,7 @@ export function AlbumCard({ album }: { album: Album }) {
         <img
           src={`/api/artwork/${album.id}`}
           alt={album.name}
-          className="aspect-square w-full rounded object-cover shadow-lg"
+          className="aspect-square w-full rounded-sm object-cover shadow-lg"
           loading="lazy"
           decoding="async"
         />
@@ -74,7 +74,7 @@ export function MixCard({ title, tracks }: { title: string; tracks: Track[] }) {
         <img
           src={`/api/artwork/${tracks[0]?.albumId}`}
           alt={title}
-          className="aspect-square w-full rounded object-cover shadow-lg"
+          className="aspect-square w-full rounded-sm object-cover shadow-lg"
           loading="lazy"
           decoding="async"
         />

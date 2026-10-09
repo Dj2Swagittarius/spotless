@@ -103,10 +103,10 @@ export default function StatsPage() {
               {days.map((d) => (
                 <div key={d.day} className="group relative flex-1">
                   <div
-                    className={`w-full rounded-sm ${d.plays > 0 ? 'bg-accent' : 'bg-highlight'}`}
+                    className={`w-full rounded-xs ${d.plays > 0 ? 'bg-accent' : 'bg-highlight'}`}
                     style={{ height: `${Math.max(4, (d.plays / maxDaily) * 72)}px` }}
                   />
-                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded bg-black px-2 py-1 text-xs group-hover:block">
+                  <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-sm bg-black px-2 py-1 text-xs group-hover:block">
                     {d.day}: {d.plays}
                   </div>
                 </div>
@@ -128,8 +128,8 @@ export default function StatsPage() {
                       </span>
                       <span className="text-subdued">{a.plays} plays · {fmtHours(a.seconds)}</span>
                     </div>
-                    <div className="h-1.5 rounded bg-highlight">
-                      <div className="h-full rounded bg-accent" style={{ width: `${(a.plays / maxArtistPlays) * 100}%` }} />
+                    <div className="h-1.5 rounded-sm bg-highlight">
+                      <div className="h-full rounded-sm bg-accent" style={{ width: `${(a.plays / maxArtistPlays) * 100}%` }} />
                     </div>
                   </Link>
                 ))}
@@ -141,10 +141,10 @@ export default function StatsPage() {
               {stats.topTracks.length === 0 && <div className="text-sm text-subdued">No plays in this period.</div>}
               <div className="space-y-1">
                 {stats.topTracks.map((t, i) => (
-                  <div key={t.id} className="flex items-center gap-3 rounded p-1.5 hover:bg-highlight">
+                  <div key={t.id} className="flex items-center gap-3 rounded-sm p-1.5 hover:bg-highlight">
                     <span className="w-5 text-right text-sm text-subdued">{i + 1}</span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`/api/artwork/${t.albumId}`} alt="" className="h-9 w-9 rounded object-cover" loading="lazy" decoding="async" />
+                    <img src={`/api/artwork/${t.albumId}`} alt="" className="h-9 w-9 rounded-sm object-cover" loading="lazy" decoding="async" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{t.title}</div>
                       <div className="truncate text-xs text-subdued">{t.artist}</div>
@@ -161,12 +161,12 @@ export default function StatsPage() {
             {stats.topAlbums.length === 0 && <div className="text-sm text-subdued">No plays in this period.</div>}
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
               {stats.topAlbums.map((al) => (
-                <Link key={al.id} href={`/album/${al.id}`} className="rounded bg-base p-3 hover:bg-highlight">
+                <Link key={al.id} href={`/album/${al.id}`} className="rounded-sm bg-base p-3 hover:bg-highlight">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={`/api/artwork/${al.id}`}
                     alt=""
-                    className="mb-2 aspect-square w-full rounded object-cover"
+                    className="mb-2 aspect-square w-full rounded-sm object-cover"
                     loading="lazy"
                     decoding="async"
                   />

@@ -5,6 +5,9 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- Tailwind CSS 4 (migrated with the official upgrade tool; theme tokens now live in `globals.css`, the UI is unchanged), `@types/node` 26, `docker/login-action` 4 and `docker/setup-qemu-action` 4.
+- README refreshed: formatting, 0.2.0 features and the release flow documented.
+
 ## [0.3.0] - 2026-10-09
 
 - Security: the internet-radio proxy now validates every redirect hop against the private-address (SSRF) block instead of letting fetch follow redirects blindly; chains longer than 5 hops are refused.

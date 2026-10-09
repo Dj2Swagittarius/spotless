@@ -47,8 +47,8 @@ export default function LikedPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col items-center gap-6 rounded-lg bg-gradient-to-b from-white/10 to-transparent p-6 sm:flex-row sm:items-end">
-        <div className="flex h-48 w-48 shrink-0 items-center justify-center rounded bg-gradient-to-br from-indigo-600 to-white/80 shadow-2xl sm:h-56 sm:w-56">
+      <header className="flex flex-col items-center gap-6 rounded-lg bg-linear-to-b from-white/10 to-transparent p-6 sm:flex-row sm:items-end">
+        <div className="flex h-48 w-48 shrink-0 items-center justify-center rounded-sm bg-linear-to-br from-indigo-600 to-white/80 shadow-2xl sm:h-56 sm:w-56">
           <HeartIcon size={80} filled className="text-white" />
         </div>
         <div className="text-center sm:text-left">

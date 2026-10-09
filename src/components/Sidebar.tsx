@@ -64,7 +64,7 @@ export default function Sidebar() {
   );
 
   const rowClass = (active: boolean) =>
-    `flex w-full items-center gap-3 rounded px-2 py-1.5 text-left hover:bg-highlight ${active ? 'bg-elevated' : ''}`;
+    `flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left hover:bg-highlight ${active ? 'bg-elevated' : ''}`;
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col gap-2 md:flex">
@@ -115,7 +115,7 @@ export default function Sidebar() {
           {tab === 'playlists' && (
             <>
               <Link href="/liked" className={rowClass(pathname === '/liked')}>
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-gradient-to-br from-indigo-600 to-white/80">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-sm bg-linear-to-br from-indigo-600 to-white/80">
                   <HeartIcon size={18} filled className="text-white" />
                 </div>
                 <div className="min-w-0">
@@ -138,7 +138,7 @@ export default function Sidebar() {
             albums.map((a) => (
               <Link key={a.id} href={`/album/${a.id}`} className={rowClass(pathname === `/album/${a.id}`)}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/artwork/${a.id}`} alt="" className="h-11 w-11 shrink-0 rounded object-cover" loading="lazy" />
+                <img src={`/api/artwork/${a.id}`} alt="" className="h-11 w-11 shrink-0 rounded-sm object-cover" loading="lazy" />
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">{a.name}</div>
                   <div className="truncate text-xs text-subdued">{a.artist}</div>

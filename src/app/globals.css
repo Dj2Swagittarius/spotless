@@ -1,27 +1,75 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
-html,
-body {
-  height: 100%;
-  background: #000;
-  color: #fff;
-  font-family: var(--font-app), 'Helvetica Neue', helvetica, arial, sans-serif;
+@theme {
+  --color-base: #121212;
+  --color-elevated: #181818;
+  --color-highlight: #1f1f1f;
+  --color-card: #252525;
+  --color-press: #2a2a2a;
+  --color-border: #4d4d4d;
+  --color-borderLight: #7c7c7c;
+  --color-subdued: #b3b3b3;
+  --color-accent: #1ed760;
+  --color-accentBright: #3be477;
+  --color-accentDark: #1db954;
+  --color-negative: #f3727f;
+  --color-warning: #ffa42b;
+  --color-announce: #539df5;
+
+  --shadow-elevated: rgba(0, 0, 0, 0.3) 0px 8px 8px;
+  --shadow-dialog: rgba(0, 0, 0, 0.5) 0px 8px 24px;
+  --shadow-insetBorder:
+    rgb(18, 18, 18) 0px 1px 0px, rgb(124, 124, 124) 0px 0px 0px 1px inset;
+
+  /* the face itself is --font-display-face (next/font in layout.tsx); --font-display is the Tailwind token */
+  --font-display: var(--font-display-face), var(--font-app), sans-serif;
+  --font-sans:
+    var(--font-app), Helvetica Neue, helvetica, arial, Hiragino Sans, Meiryo,
+    sans-serif;
 }
 
-/* Spotify-style pill buttons: uppercase label voice with wide tracking */
-@layer components {
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+@utility step-enter {
   /* setup wizard: step content rises in on change */
-  .step-enter {
-    animation: step-rise 0.28s ease both;
+  animation: step-rise 0.28s ease both;
+}
+
+@utility btn-pill {
+  @apply rounded-full border border-border px-4 py-1.5 text-sm font-bold uppercase tracking-widest text-subdued transition-colors hover:border-white hover:text-white disabled:opacity-50;
+}
+
+@utility btn-primary {
+  @apply rounded-full bg-accent px-6 py-2 text-sm font-bold uppercase tracking-widest text-black transition-transform hover:scale-[1.04] hover:bg-accentBright disabled:opacity-50;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    background: #000;
+    color: #fff;
+    font-family:
+      var(--font-app), 'Helvetica Neue', helvetica, arial, sans-serif;
   }
-  .btn-pill {
-    @apply rounded-full border border-border px-4 py-1.5 text-sm font-bold uppercase tracking-[0.1em] text-subdued transition-colors hover:border-white hover:text-white disabled:opacity-50;
-  }
-  .btn-primary {
-    @apply rounded-full bg-accent px-6 py-2 text-sm font-bold uppercase tracking-[0.1em] text-black transition-transform hover:scale-[1.04] hover:bg-accentBright disabled:opacity-50;
-  }
+
+  /* Spotify-style pill buttons: uppercase label voice with wide tracking */
 }
 
 @keyframes step-rise {

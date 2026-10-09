@@ -49,7 +49,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <TopBar />
       <div className="flex min-h-0 flex-1 gap-2 p-2">
         <Sidebar />
-        <main className="min-h-0 flex-1 overflow-y-auto rounded-lg bg-gradient-to-b from-highlight to-base">
+        <main className="min-h-0 flex-1 overflow-y-auto rounded-lg bg-linear-to-b from-highlight to-base">
           <div className="px-4 pb-6 pt-4 sm:px-6 sm:pb-8">{children}</div>
         </main>
       </div>

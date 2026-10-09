@@ -7,7 +7,7 @@ export default function PlaylistCover({ artIds, size = 'md' }: { artIds?: number
 
   if (ids.length >= 4) {
     return (
-      <div className={`grid shrink-0 grid-cols-2 grid-rows-2 overflow-hidden rounded ${cls}`}>
+      <div className={`grid shrink-0 grid-cols-2 grid-rows-2 overflow-hidden rounded-sm ${cls}`}>
         {ids.slice(0, 4).map((id) => (
           // eslint-disable-next-line @next/next/no-img-element
           <img key={id} src={`/api/artwork/${id}`} alt="" className="h-full w-full object-cover" loading="lazy" />
@@ -18,11 +18,11 @@ export default function PlaylistCover({ artIds, size = 'md' }: { artIds?: number
   if (ids.length > 0) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={`/api/artwork/${ids[0]}`} alt="" className={`shrink-0 rounded object-cover ${cls}`} loading="lazy" />
+      <img src={`/api/artwork/${ids[0]}`} alt="" className={`shrink-0 rounded-sm object-cover ${cls}`} loading="lazy" />
     );
   }
   return (
-    <div className={`flex shrink-0 items-center justify-center rounded bg-gradient-to-br from-highlight to-base ${cls}`}>
+    <div className={`flex shrink-0 items-center justify-center rounded-sm bg-linear-to-br from-highlight to-base ${cls}`}>
       <MusicIcon size={size === 'lg' ? 72 : size === 'md' ? 24 : 18} className="text-subdued" />
     </div>
   );

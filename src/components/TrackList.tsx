@@ -194,7 +194,7 @@ export default function TrackList({
               <div className="flex h-8 w-8 items-center justify-center text-sm text-subdued">{rowNumber(t, i)}</div>
               <div className="flex min-w-0 items-center gap-3">
                 {showArt && (
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-highlight">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-sm bg-highlight">
                     <MusicIcon size={16} className="text-subdued" />
                   </div>
                 )}
@@ -205,7 +205,7 @@ export default function TrackList({
               </div>
               {showAlbum ? <div className="hidden truncate text-sm text-subdued sm:block">{t.album}</div> : <div className="hidden sm:block" />}
               <div className="flex items-center gap-2">
-                <span className="hidden rounded border border-subdued/50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-subdued lg:inline">
+                <span className="hidden rounded-sm border border-subdued/50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-subdued lg:inline">
                   Not in library
                 </span>
                 <GetButton artist={t.artist} album={t.album} />
@@ -246,7 +246,7 @@ export default function TrackList({
             <div className="flex min-w-0 items-center gap-3">
               {showArt && (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={`/api/artwork/${t.albumId}`} alt="" className="h-10 w-10 rounded object-cover" loading="lazy" decoding="async" />
+                <img src={`/api/artwork/${t.albumId}`} alt="" className="h-10 w-10 rounded-sm object-cover" loading="lazy" decoding="async" />
               )}
               <div className="min-w-0">
                 <div className={`truncate font-medium ${isCurrent ? 'text-accent' : ''}`}>{t.title}</div>

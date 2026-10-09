@@ -86,7 +86,7 @@ export default function SpotifyImport({ onClose, onImported }: { onClose: () => 
           </button>
         </div>
 
-        {error && <div className="mb-3 rounded bg-negative/10 px-3 py-2 text-sm text-negative">{error}</div>}
+        {error && <div className="mb-3 rounded-sm bg-negative/10 px-3 py-2 text-sm text-negative">{error}</div>}
         {!playlists && !error && <div className="text-subdued">Loading your Spotify playlists…</div>}
         {playlists?.length === 0 && <div className="text-subdued">No playlists on your Spotify account.</div>}
 
@@ -94,7 +94,7 @@ export default function SpotifyImport({ onClose, onImported }: { onClose: () => 
           {playlists?.map((p) => {
             const r = results[p.id];
             return (
-              <div key={p.id} className="rounded bg-base p-3">
+              <div key={p.id} className="rounded-sm bg-base p-3">
                 <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{p.name}</div>
@@ -125,7 +125,7 @@ export default function SpotifyImport({ onClose, onImported }: { onClose: () => 
                           e.preventDefault();
                           copyMissing(r);
                         }}
-                        className="ml-2 rounded border border-subdued px-2 py-0.5 text-xs hover:border-white hover:text-white"
+                        className="ml-2 rounded-sm border border-subdued px-2 py-0.5 text-xs hover:border-white hover:text-white"
                       >
                         Copy list
                       </button>
@@ -137,7 +137,7 @@ export default function SpotifyImport({ onClose, onImported }: { onClose: () => 
                             e.preventDefault();
                             sendMissingToLidarr(p.id, r);
                           }}
-                          className="ml-2 rounded border border-subdued px-2 py-0.5 text-xs hover:border-white hover:text-white"
+                          className="ml-2 rounded-sm border border-subdued px-2 py-0.5 text-xs hover:border-white hover:text-white"
                         >
                           ⤓ Send all to Lidarr
                         </button>
