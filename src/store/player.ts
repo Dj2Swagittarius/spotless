@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 import type { Track } from '@/lib/types';
 
 type Repeat = 'off' | 'all' | 'one';
@@ -15,6 +15,12 @@ interface PlayerState {
   shuffle: boolean;
   repeat: Repeat;
   volume: number;
+  /**
+   * Multiplier the Player applies on top of `volume` while the DJ is talking (1 = not
+   * ducked). Kept apart from `volume`, and out of the persisted slice, so a reload
+   * mid-segue doesn't come back at the ducked level and the slider never shows it.
+   */
+  duck: number;
   radio: boolean;
   /** queue was started by the AI DJ: enables spoken segues between songs */
   djSession: boolean;
@@ -30,6 +36,8 @@ interface PlayerState {
   toggleShuffle: () => void;
   cycleRepeat: () => void;
   setVolume: (v: number) => void;
+  /** set the DJ duck multiplier (0..1); 1 restores full volume */
+  setDuck: (d: number) => void;
   toggleRadio: () => void;
   /** play exactly this list in order (DJ sets), ignoring radio/shuffle */
   playDj: (tracks: Track[]) => void;
@@ -42,7 +50,68 @@ type PersistedPlayer = Pick<PlayerState, 'queue' | 'index' | 'repeat' | 'shuffle
 // bytes, so a radio session that ran for days must not take the whole origin's quota.
 const PERSIST_MAX_TRACKS = 500;
 const PERSIST_KEY = 'spotless-player';
+// How long an unsaved store change may wait before the session is written out. Dragging
+// the volume slider is a store write per tick; a couple of writes a second is plenty.
+const PERSIST_DELAY_MS = 500;
 const REPEATS: Repeat[] = ['off', 'all', 'one'];
+
+interface CoalescingStorageOptions {
+  read: (name: string) => string | null;
+  write: (name: string, value: string) => void;
+  remove: (name: string) => void;
+  /** how long after the first unsaved setItem the (single) write happens */
+  delayMs: number;
+  /** writes are dropped while this is false (before the saved session has been read back) */
+  canWrite?: () => boolean;
+}
+
+/**
+ * A persist storage that serialises lazily: setItem only remembers the latest value, and
+ * the JSON.stringify + write happen at most once per `delayMs` (or on flush), with
+ * whatever is newest by then. Zustand's persist calls setItem on every set(), and the
+ * persisted slice carries up to PERSIST_MAX_TRACKS tracks, so writing eagerly would
+ * re-serialise the whole queue for every volume-slider tick.
+ */
+export function createCoalescingStorage<S>(opts: CoalescingStorageOptions): PersistStorage<S> & { flush: () => void } {
+  let pending: { name: string; value: StorageValue<S> } | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    if (!pending) return;
+    const { name, value } = pending;
+    pending = null;
+    try {
+      opts.write(name, JSON.stringify(value));
+    } catch {
+      // quota exceeded or storage blocked: the session just isn't saved this time
+    }
+  };
+  return {
+    getItem: (name) => {
+      try {
+        const raw = opts.read(name);
+        return raw === null ? null : (JSON.parse(raw) as StorageValue<S>);
+      } catch {
+        return null; // blocked storage or a corrupt entry reads as "nothing saved"
+      }
+    },
+    setItem: (name, value) => {
+      if (opts.canWrite && !opts.canWrite()) return;
+      pending = { name, value };
+      if (timer === null) timer = setTimeout(flush, opts.delayMs);
+    },
+    removeItem: (name) => {
+      if (pending?.name === name) pending = null;
+      try {
+        opts.remove(name);
+      } catch {
+        // storage blocked
+      }
+    },
+    flush,
+  };
+}
 
 function shuffleUpcoming(queue: Track[], index: number): Track[] {
   const head = queue.slice(0, index + 1);
@@ -61,6 +130,26 @@ function locate(queue: Track[], track: Track | undefined): number {
   return byRef >= 0 ? byRef : queue.findIndex((t) => t.id === track.id);
 }
 
+const persistStorage: PersistStorage<PersistedPlayer> & { flush: () => void } = createCoalescingStorage({
+  read: (k) => (typeof localStorage === 'undefined' ? null : localStorage.getItem(k)),
+  write: (k, v) => localStorage.setItem(k, v),
+  remove: (k) => localStorage.removeItem(k),
+  delayMs: PERSIST_DELAY_MS,
+  // Until the saved session has been read back, the store holds the empty initial state;
+  // a set() that lands in that window must not overwrite the saved queue with it.
+  // (Typed explicitly: the store references this storage and vice versa.)
+  canWrite: (): boolean => usePlayer.persist.hasHydrated(),
+});
+
+// A pending write must not be lost to the tab closing or being backgrounded (mobile
+// browsers kill hidden tabs without any further event).
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', persistStorage.flush);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') persistStorage.flush();
+  });
+}
+
 export const usePlayer = create<PlayerState>()(
   persist(
     (set, get) => ({
@@ -71,6 +160,7 @@ export const usePlayer = create<PlayerState>()(
       shuffle: false,
       repeat: 'off',
       volume: 1,
+      duck: 1,
       radio: false,
       djSession: false,
 
@@ -173,6 +263,8 @@ export const usePlayer = create<PlayerState>()(
 
       setVolume: (volume) => set({ volume }),
 
+      setDuck: (d) => set({ duck: Number.isFinite(d) ? Math.max(0, Math.min(1, d)) : 1 }),
+
       playDj: (tracks) => {
         if (tracks.length === 0) return;
         set({ queue: tracks.slice(), originalQueue: tracks.slice(), index: 0, isPlaying: true, djSession: true });
@@ -187,6 +279,7 @@ export const usePlayer = create<PlayerState>()(
       // first client render matches the server HTML (an empty player) instead of the
       // saved queue — reading localStorage during render was a hydration mismatch.
       skipHydration: true,
+      storage: persistStorage,
       partialize: (s): PersistedPlayer => {
         // keep the current track and what follows it when the queue has to be trimmed
         const start = Math.max(0, Math.min(s.index, s.queue.length - PERSIST_MAX_TRACKS));
