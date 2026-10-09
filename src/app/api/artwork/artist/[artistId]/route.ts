@@ -42,7 +42,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ arti
   };
   if (isNotModified(req, v)) return new Response(null, { status: 304, headers });
 
-  const buf = await fs.promises.readFile(file);
+  // The scanner may unlink or atomically replace the file between the stat and this read
+  // (orphan cleanup, rm+rename rewrite); a vanished file is a placeholder, not a 500.
+  const buf = await fs.promises.readFile(file).catch(() => null);
+  if (!buf) return placeholder(letter);
   // stored bytes are only ever served under a sniffed raster type, never text/html or svg
   const contentType = imageContentType(buf);
   if (!contentType) return placeholder(letter);
