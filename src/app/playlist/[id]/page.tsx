@@ -96,11 +96,14 @@ export default function PlaylistPage({ params }: { params: Promise<{ id: string 
     const [moved] = tracks.splice(from, 1);
     tracks.splice(to, 0, moved);
     setPl({ ...pl, tracks }); // optimistic
-    await fetch(`/api/playlists/${id}/tracks`, {
+    const res = await fetch(`/api/playlists/${id}/tracks`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: tracks.map((t) => (t.missing ? `p:${t.placeholderId}` : `t:${t.id}`)) }),
-    }).catch(() => load());
+    }).catch(() => null);
+    // a 4xx (gone, not owned, bad body) resolves rather than rejects; refetch on any failure so the
+    // list goes back to the order that is actually stored
+    if (!res?.ok) load();
   };
 
   // re-match placeholders against the library (a rescan does this too)

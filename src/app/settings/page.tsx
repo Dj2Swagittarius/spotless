@@ -115,6 +115,8 @@ export default function SettingsPage() {
   const [spotifyRedirectSource, setSpotifyRedirectSource] = useState<SpotifyRedirectConfig['source']>('default');
   const [spotifyRedirectMsg, setSpotifyRedirectMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [spotifyRedirectBusy, setSpotifyRedirectBusy] = useState(false);
+  const [spotifyMsg, setSpotifyMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [spotifyBusy, setSpotifyBusy] = useState(false);
 
   // last.fm
   const [lastfm, setLastfm] = useState<{ configured: boolean; connected: boolean; username: string | null } | null>(null);
@@ -410,16 +412,39 @@ export default function SettingsPage() {
     setLidarrMsg({ ok: true, text: 'Disconnected' });
   };
 
+  const refreshSpotify = () =>
+    fetch('/api/spotify/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => s && setSpotify(s))
+      .catch(() => {});
+
+  // the route answers 401 (reconnect), 429 (rate limited, with retryAfter) or 502 as JSON; show that text
+  // rather than silently refetching the status, which would make a failed import look like a no-op
   const reimportSpotify = async () => {
-    await fetch('/api/spotify/status', { method: 'POST' });
-    const s = await fetch('/api/spotify/status').then((r) => r.json());
-    setSpotify(s);
+    setSpotifyBusy(true);
+    setSpotifyMsg(null);
+    const res = await fetch('/api/spotify/status', { method: 'POST' }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    setSpotifyBusy(false);
+    if (!res?.ok) {
+      setSpotifyMsg({ ok: false, text: data.error || `Re-import failed${res ? ` (HTTP ${res.status})` : ''}` });
+      return;
+    }
+    setSpotifyMsg({ ok: true, text: `Re-imported ${data.topCount ?? 0} top and ${data.savedCount ?? 0} saved artists.` });
+    await refreshSpotify();
   };
 
   const disconnectSpotify = async () => {
-    await fetch('/api/spotify/status', { method: 'DELETE' });
-    const s = await fetch('/api/spotify/status').then((r) => r.json());
-    setSpotify(s);
+    setSpotifyBusy(true);
+    setSpotifyMsg(null);
+    const res = await fetch('/api/spotify/status', { method: 'DELETE' }).catch(() => null);
+    setSpotifyBusy(false);
+    if (!res?.ok) {
+      const data = res ? await res.json().catch(() => ({})) : {};
+      setSpotifyMsg({ ok: false, text: data.error || 'Could not disconnect Spotify' });
+      return;
+    }
+    await refreshSpotify();
   };
 
   const applySpotifyRedirectConfig = (d: SpotifyRedirectConfig) => {
@@ -827,9 +852,16 @@ export default function SettingsPage() {
               {spotify.importedAt && <> · last import {new Date(spotify.importedAt).toLocaleString()}</>}
             </div>
             <div className="flex gap-2">
-              <button className={btn} onClick={reimportSpotify}>Re-import taste</button>
-              <button className={btn} onClick={disconnectSpotify}>Disconnect</button>
+              <button className={btn} onClick={reimportSpotify} disabled={spotifyBusy}>
+                {spotifyBusy ? 'Working…' : 'Re-import taste'}
+              </button>
+              <button className={btn} onClick={disconnectSpotify} disabled={spotifyBusy}>Disconnect</button>
             </div>
+            {spotifyMsg && (
+              <div className={`mt-3 rounded px-3 py-2 text-sm ${spotifyMsg.ok ? 'bg-accent/10 text-accent' : 'bg-negative/10 text-negative'}`}>
+                {spotifyMsg.text}
+              </div>
+            )}
           </>
         ) : (
           <>
