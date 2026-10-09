@@ -880,7 +880,7 @@ export default function Player() {
         </>
       )}
 
-      <div className={`relative z-40 border-t border-highlight bg-black px-3 py-2 md:border-0 md:px-4 md:py-3 ${track ? '' : 'hidden md:block'}`}>
+      <div className={`app-player relative z-40 border-t border-highlight bg-black px-3 py-2 md:border-0 md:px-4 md:py-3 ${track ? '' : 'hidden md:block'}`}>
         {/* mobile: collapsed mini-player — tap to expand */}
         {track && !expanded && (
           <div

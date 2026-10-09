@@ -167,7 +167,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
 
           {step === 0 && (
             <div className="flex flex-col items-center gap-5 py-2 text-center">
-              <LogoMark size={72} hole="#181818" />
+              <LogoMark size={72} hole="var(--color-elevated)" />
               <h1 className="font-display text-4xl font-extrabold leading-none tracking-tight">
                 Spotless<span className="text-accent">.</span>
               </h1>

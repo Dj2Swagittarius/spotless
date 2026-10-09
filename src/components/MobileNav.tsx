@@ -17,7 +17,7 @@ export default function MobileNav() {
     `flex flex-col items-center gap-1 text-xs ${active ? 'text-white' : 'text-subdued'}`;
 
   return (
-    <nav className="relative z-40 flex items-center justify-around border-t border-highlight bg-black py-2 md:hidden">
+    <nav className="app-mobilenav relative z-40 flex items-center justify-around border-t border-highlight bg-black py-2 md:hidden">
       <Link href="/" className={cls(pathname === '/')}>
         <HomeIcon size={24} /> Home
       </Link>

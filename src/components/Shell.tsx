@@ -9,12 +9,16 @@ import ProfilePicker from './ProfilePicker';
 import SetupWizard from './SetupWizard';
 import DjBooth from './DjBooth';
 import { useLikes } from '@/store/likes';
+import { applyTheme, loadTheme } from '@/lib/themes';
 
 type Gate = 'loading' | 'setup' | 'login' | 'ready';
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const loadLikes = useLikes((s) => s.load);
   const [gate, setGate] = useState<Gate>('loading');
+
+  // the <head> script already set data-theme; this drops unknown ids and syncs the theme-color meta
+  useEffect(() => applyTheme(loadTheme()), []);
 
   useEffect(() => {
     fetch('/api/users', { cache: 'no-store' })
@@ -45,11 +49,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-dvh flex-col bg-black">
+    <div className="app-root flex h-dvh flex-col bg-black">
       <TopBar />
       <div className="flex min-h-0 flex-1 gap-2 p-2">
         <Sidebar />
-        <main className="min-h-0 flex-1 overflow-y-auto rounded-lg bg-linear-to-b from-highlight to-base">
+        <main className="app-main min-h-0 flex-1 overflow-y-auto rounded-lg bg-linear-to-b from-highlight to-base">
           <div className="px-4 pb-6 pt-4 sm:px-6 sm:pb-8">{children}</div>
         </main>
       </div>

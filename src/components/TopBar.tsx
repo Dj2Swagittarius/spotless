@@ -54,7 +54,7 @@ export default function TopBar() {
     location.reload();
   };
   return (
-    <div className="hidden items-center gap-3 px-4 pt-2 md:flex">
+    <div className="app-topbar hidden items-center gap-3 px-4 pt-2 md:flex">
       <Link href="/" className="w-56 shrink-0">
         <Logo />
       </Link>

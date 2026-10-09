@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import './globals.css';
 import Shell from '@/components/Shell';
+import { THEME_INIT_SCRIPT } from '@/lib/themes';
 
 // closest open font to Spotify's Circular: geometric, rounded, friendly. Self-hosted (OFL, see
 // fonts/LICENSE-*.txt) so builds never depend on fetching Google Fonts.
@@ -36,7 +37,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${figtree.variable} ${bricolage.variable}`}>
+    // suppressHydrationWarning: THEME_INIT_SCRIPT sets data-theme on <html> before React hydrates
+    <html lang="en" className={`${figtree.variable} ${bricolage.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="font-sans">
         <Shell>{children}</Shell>
       </body>

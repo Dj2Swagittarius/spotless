@@ -1,6 +1,14 @@
 @import 'tailwindcss';
+@import './themes.css';
 
-@theme {
+/*
+  `static`: emit every token even if no utility uses it; themes.css and the rules below
+  read them directly. Themes override these (plus --color-white = foreground and
+  --color-black = app background / on-accent ink) under [data-theme]; see src/lib/themes.ts.
+*/
+@theme static {
+  --color-white: #fff;
+  --color-black: #000;
   --color-base: #121212;
   --color-elevated: #181818;
   --color-highlight: #1f1f1f;
@@ -60,11 +68,14 @@
 }
 
 @layer base {
+  html {
+    color-scheme: dark;
+  }
   html,
   body {
     height: 100%;
-    background: #000;
-    color: #fff;
+    background: var(--color-black);
+    color: var(--color-white);
     font-family:
       var(--font-app), 'Helvetica Neue', helvetica, arial, sans-serif;
   }
@@ -85,14 +96,14 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #4d4d4d transparent;
+  scrollbar-color: var(--color-border) transparent;
 }
 
 *::-webkit-scrollbar {
   width: 12px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #4d4d4d;
+  background: var(--color-border);
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: content-box;
@@ -103,7 +114,7 @@
 
 /* keyboard focus: visible ring, only for keyboard (not mouse clicks) */
 :focus-visible {
-  outline: 2px solid #1db954;
+  outline: 2px solid var(--color-accentDark);
   /* no border-radius here: it squared off rounded-full controls; the outline follows the element's own radius */
   outline-offset: 2px;
 }
@@ -132,7 +143,7 @@ input[type='range'] {
   appearance: none;
   height: 4px;
   border-radius: 2px;
-  background: linear-gradient(to right, #fff var(--fill, 0%), #4d4d4d var(--fill, 0%));
+  background: linear-gradient(to right, var(--color-white) var(--fill, 0%), var(--color-border) var(--fill, 0%));
   cursor: pointer;
 }
 input[type='range']::-webkit-slider-thumb {
@@ -141,7 +152,7 @@ input[type='range']::-webkit-slider-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--color-white);
   opacity: 0;
 }
 /* the thumb is the only visual the keyboard user has: show it on focus as well as hover */
@@ -151,5 +162,9 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 input[type='range']:hover,
 input[type='range']:focus-visible {
-  background: linear-gradient(to right, #1db954 var(--fill, 0%), #4d4d4d var(--fill, 0%));
+  background: linear-gradient(to right, var(--color-accentDark) var(--fill, 0%), var(--color-border) var(--fill, 0%));
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
