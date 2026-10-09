@@ -5,6 +5,8 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-09
+
 - Security: the internet-radio proxy now validates every redirect hop against the private-address (SSRF) block instead of letting fetch follow redirects blindly; chains longer than 5 hops are refused.
 - Streaming: byte-range handling follows RFC 9110 more closely — an inverted range (bytes=500-100) is ignored rather than answered 416, and If-Range only honours an exact Last-Modified or a strong ETag.
 - Artwork: a cover or artist image removed by the scanner between the existence check and the read now falls back to the placeholder instead of a 500.
