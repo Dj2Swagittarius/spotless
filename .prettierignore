@@ -9,3 +9,5 @@ next-env.d.ts
 *.tsbuildinfo
 .claude/
 test-env/
+desktop/dist
+desktop/package-lock.json

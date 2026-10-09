@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spotless</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121212;
+        --card: #1e1e1e;
+        --text: #ffffff;
+        --subdued: #a7a7a7;
+        --accent: #1ed760;
+        --error: #f3727f;
+        --field: #2a2a2a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.5 system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 440px;
+        background: var(--card);
+        border-radius: 12px;
+        padding: 32px;
+      }
+      img {
+        width: 56px;
+        height: 56px;
+        display: block;
+        margin-bottom: 20px;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 24px;
+      }
+      p {
+        margin: 0 0 24px;
+        color: var(--subdued);
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background: var(--field);
+        color: var(--text);
+        font: inherit;
+      }
+      input:focus {
+        outline: none;
+        border-color: var(--subdued);
+      }
+      .error {
+        color: var(--error);
+        margin: 12px 0 0;
+        min-height: 1.5em;
+      }
+      .actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 20px;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 28px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button[type='submit'] {
+        background: var(--accent);
+        color: #000;
+      }
+      button[type='button'] {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid #727272;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .scan {
+        margin-top: 28px;
+        padding-top: 24px;
+        border-top: 1px solid #333;
+      }
+      .scan p {
+        margin: 12px 0 0;
+      }
+      .servers {
+        list-style: none;
+        margin: 12px 0 0;
+        padding: 0;
+        display: grid;
+        gap: 8px;
+      }
+      .servers button {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        border-radius: 6px;
+        padding: 12px 14px;
+        background: var(--field);
+        border: 1px solid transparent;
+        text-align: left;
+        font-weight: 600;
+      }
+      .servers button:hover,
+      .servers button:focus-visible {
+        border-color: var(--accent);
+        outline: none;
+      }
+      .servers .version {
+        color: var(--subdued);
+        font-weight: 400;
+        white-space: nowrap;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="icon.png" alt="" />
+      <h1>Connect to Spotless</h1>
+      <p>Enter the address you open Spotless at in your browser, or scan your network for it.</p>
+      <form id="form" novalidate>
+        <label for="url">Server address</label>
+        <input
+          id="url"
+          name="url"
+          type="text"
+          placeholder="http://192.168.1.10:3000"
+          autocomplete="url"
+          spellcheck="false"
+          autofocus
+        />
+        <p class="error" id="error" role="alert"></p>
+        <div class="actions">
+          <button type="submit" id="connect">Connect</button>
+          <button type="button" id="cancel" hidden>Cancel</button>
+        </div>
+      </form>
+      <section class="scan">
+        <button type="button" id="scan">Scan network</button>
+        <p id="scan-status" role="status"></p>
+        <ul class="servers" id="servers"></ul>
+      </section>
+    </main>
+    <script src="setup.js"></script>
+  </body>
+</html>

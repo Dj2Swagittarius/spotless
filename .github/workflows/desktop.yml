@@ -1,0 +1,66 @@
+name: Desktop app
+
+# Builds the Electron desktop app (desktop/) for Windows, macOS and Linux. Pull requests that touch
+# the app build it so the installers can be downloaded from the run's artifacts and tried out; the
+# release job in docker.yml calls this workflow on v* tags and attaches the installers to the release.
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-latest
+            name: linux
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - run: npm ci
+
+      # No signing certificates: Windows installers are unsigned and macOS builds are ad-hoc signed
+      # (see electron-builder.js). electron-builder skips all signing on pull requests unless told
+      # otherwise, and an unsigned Apple Silicon build will not launch; ad-hoc signing uses no secrets.
+      # Called through node: on the Windows runner `npx electron-builder` exits 0 without building.
+      - run: node node_modules/electron-builder/cli.js --publish never
+        env:
+          CSC_FOR_PULL_REQUEST: 'true'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb

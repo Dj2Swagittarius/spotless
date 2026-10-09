@@ -5,6 +5,12 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- Desktop app for Windows, macOS and Linux (`desktop/`, Electron). A native window around your Spotless server, for
+  people who would rather not keep a browser tab open: first launch asks for the server address or scans the local
+  network for one, then remembers it and the window position. Media keys and the OS media overlay work through the
+  player's existing Media Session support, playback timers keep running while minimized, links to other sites open
+  in the default browser, and Spotify/Last.fm connect stays in-app. Installers are built in CI and attached to each
+  GitHub Release; they are not code-signed yet.
 - Tailwind CSS 4 (migrated with the official upgrade tool; theme tokens now live in `globals.css`, the UI is unchanged), `@types/node` 26, `docker/login-action` 4 and `docker/setup-qemu-action` 4.
 - README refreshed: formatting, 0.2.0 features and the release flow documented.
 

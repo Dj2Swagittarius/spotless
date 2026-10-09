@@ -11,3 +11,5 @@ next-env.d.ts
 test-env
 # personal dj-test settings (LAN addresses, NAS share)
 dj-test/docker-compose.override.yml
+# desktop app build output
+desktop/dist/
