@@ -31,8 +31,11 @@ jobs:
     permissions:
       contents: read
 
+    # bash on every runner: under the Windows default (PowerShell) npx electron-builder exits
+    # without building anything.
     defaults:
       run:
+        shell: bash
         working-directory: desktop
 
     steps:
