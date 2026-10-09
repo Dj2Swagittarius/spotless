@@ -146,6 +146,8 @@ export function saveSpotifyRedirectOrigin(input: string): SpotifyRedirectConfig 
 const tokensKey = (u: number) => `spotify_tokens:${u}`;
 const tasteKey = (u: number) => `spotify_taste:${u}`;
 const NOT_CONNECTED = 'Spotify not connected';
+// Since February 2026 Spotify only returns the songs of playlists the user owns or collaborates on
+const NOT_SHARED = "Spotify doesn't share the songs of playlists you don't own (Spotify-made mixes, other people's lists). Copy it into a playlist of your own on Spotify, then import that.";
 
 /** A non-2xx answer from Spotify's token or Web API. 401 means the stored grant is unusable. */
 export class SpotifyApiError extends Error {
@@ -176,7 +178,7 @@ export function spotifyErrorResponse(err: unknown): NextResponse {
     return NextResponse.json({ error: `Spotify request failed (HTTP ${err.status})` }, { status: 502 });
   }
   const message = err instanceof Error ? err.message : String(err);
-  if (message === NOT_CONNECTED) return NextResponse.json({ error: message }, { status: 400 });
+  if (message === NOT_CONNECTED || message === NOT_SHARED) return NextResponse.json({ error: message }, { status: 400 });
   console.error('spotify request failed:', err);
   return NextResponse.json({ error: 'Spotify is unreachable right now; try again later' }, { status: 502 });
 }
@@ -427,21 +429,36 @@ export interface SpotifyPlaylistInfo {
   id: string;
   name: string;
   trackCount: number;
+  /** Owned or collaborative: the only playlists whose songs Spotify will hand out. */
+  owned: boolean;
 }
 
 export async function listPlaylists(userId: number): Promise<SpotifyPlaylistInfo[]> {
   const token = await accessToken(userId);
   if (!token) throw new Error(NOT_CONNECTED);
+  const me = await api<{ id: string }>(userId, token, '/me');
   const out: SpotifyPlaylistInfo[] = [];
   for (let offset = 0; offset < 250; offset += 50) {
-    const page = await api<{ items: ({ id: string; name: string; tracks?: { total?: number } | null } | null)[]; next: string | null }>(
-      userId,
-      token,
-      `/me/playlists?limit=50&offset=${offset}`
-    );
+    const page = await api<{
+      items: ({
+        id: string;
+        name: string;
+        collaborative?: boolean;
+        owner?: { id?: string } | null;
+        // "tracks" was renamed "items" in February 2026; read either
+        items?: { total?: number } | null;
+        tracks?: { total?: number } | null;
+      } | null)[];
+      next: string | null;
+    }>(userId, token, `/me/playlists?limit=50&offset=${offset}`);
     for (const p of page.items ?? []) {
       if (!p?.id) continue; // Spotify returns null entries for deleted/inaccessible playlists
-      out.push({ id: p.id, name: p.name ?? 'Untitled', trackCount: p.tracks?.total ?? 0 });
+      out.push({
+        id: p.id,
+        name: p.name ?? 'Untitled',
+        trackCount: p.items?.total ?? p.tracks?.total ?? 0,
+        owned: p.owner?.id === me.id || Boolean(p.collaborative),
+      });
     }
     if (!page.next) break;
   }
@@ -459,14 +476,17 @@ async function playlistTracks(userId: number, playlistId: string): Promise<Spoti
   const token = await accessToken(userId);
   if (!token) throw new Error(NOT_CONNECTED);
   const out: SpotifyPlaylistTrack[] = [];
+  type Song = { name: string; duration_ms: number; artists?: { name: string }[]; album?: { name: string } } | null;
   for (let offset = 0; offset < 1000; offset += 100) {
-    const page = await api<{
-      items: { track: { name: string; duration_ms: number; artists: { name: string }[]; album: { name: string } } | null }[];
-      next: string | null;
-    }>(userId, token, `/playlists/${encodeURIComponent(playlistId)}/tracks?limit=100&offset=${offset}&fields=next,items(track(name,duration_ms,artists(name),album(name)))`);
-    for (const item of page.items ?? []) {
-      const t = item?.track;
-      if (!t?.name) continue; // deleted/local-only entries
+    // February 2026: /tracks was retired for /items, and each entry's "track" became "item"
+    const page = await api<{ items?: { item?: Song; track?: Song }[]; next: string | null }>(
+      userId,
+      token,
+      `/playlists/${encodeURIComponent(playlistId)}/items?limit=100&offset=${offset}`
+    );
+    for (const entry of page.items ?? []) {
+      const t = entry?.item ?? entry?.track;
+      if (!t?.name || !t.artists?.length) continue; // deleted/local-only entries and podcast episodes
       out.push({
         title: t.name,
         artist: t.artists?.[0]?.name ?? '',
@@ -489,6 +509,8 @@ export interface PlaylistImportResult {
 
 export async function importPlaylist(userId: number, spotifyPlaylistId: string, name: string): Promise<PlaylistImportResult> {
   const wanted = await playlistTracks(userId, spotifyPlaylistId);
+  // an empty answer is what Spotify gives for a playlist the user doesn't own; don't save an empty copy
+  if (!wanted.length) throw new Error(NOT_SHARED);
   const db = getDb();
   const index = buildLocalIndex(db);
 
