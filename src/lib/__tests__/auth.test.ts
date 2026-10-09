@@ -18,9 +18,77 @@ function reqWithForwardedFor(value?: string): NextRequest {
   return new NextRequest(new URL('http://localhost/api/auth/login'), { headers });
 }
 
+function reqWithHosts(headers: Record<string, string>, method = 'GET', url = 'http://127.0.0.1:3000/api/health'): NextRequest {
+  return new NextRequest(new URL(url), { method, headers: new Headers(headers) });
+}
+
 afterEach(() => {
   delete process.env.TRUST_PROXY;
   delete process.env.AUTH_MIN_PASSWORD_LENGTH;
+});
+
+describe('expectedHost', () => {
+  it('uses the Host header and ignores X-Forwarded-Host when TRUST_PROXY is unset', async () => {
+    const { expectedHost, requestOrigin } = await loadAuth({ TRUST_PROXY: undefined });
+    const req = reqWithHosts({ host: '127.0.0.1:3000', 'x-forwarded-host': 'evil.example' });
+    expect(expectedHost(req)).toBe('127.0.0.1:3000');
+    expect(requestOrigin(req)).toBe('http://127.0.0.1:3000');
+  });
+
+  it('believes the first X-Forwarded-Host entry behind a trusted proxy', async () => {
+    const { expectedHost, requestOrigin } = await loadAuth({ TRUST_PROXY: '1' });
+    const req = reqWithHosts({
+      host: 'upstream:3000',
+      'x-forwarded-host': 'music.example.com, inner.proxy',
+      'x-forwarded-proto': 'https',
+    });
+    expect(expectedHost(req)).toBe('music.example.com');
+    expect(requestOrigin(req)).toBe('https://music.example.com');
+  });
+
+  it('rejects a forwarded host that is not a bare host[:port] and keeps the Host header', async () => {
+    const { expectedHost } = await loadAuth({ TRUST_PROXY: '1' });
+    expect(expectedHost(reqWithHosts({ host: 'spotless.lan', 'x-forwarded-host': 'evil.example/path' }))).toBe('spotless.lan');
+    expect(expectedHost(reqWithHosts({ host: 'spotless.lan', 'x-forwarded-host': 'http://evil.example' }))).toBe('spotless.lan');
+    expect(expectedHost(reqWithHosts({ host: 'spotless.lan', 'x-forwarded-host': '' }))).toBe('spotless.lan');
+  });
+
+  it('falls back to the request URL host when the Host header is malformed', async () => {
+    const { expectedHost } = await loadAuth({ TRUST_PROXY: undefined });
+    // nextUrl rewrites loopback addresses to localhost, which is why the Host header is preferred
+    expect(expectedHost(reqWithHosts({ host: 'bad host!' }))).toBe('localhost:3000');
+  });
+});
+
+describe('proxy CSRF origin check', () => {
+  // POST /api/health exercises the CSRF check (unsafe method, not exempt) and, when it passes,
+  // returns NextResponse.next() for a public path without touching the database.
+  async function loadProxy(env: Record<string, string | undefined>) {
+    await loadAuth(env);
+    return (await import('@/proxy')).proxy;
+  }
+
+  it('matches Origin against the Host header, not a client-supplied X-Forwarded-Host, without TRUST_PROXY', async () => {
+    const proxy = await loadProxy({ TRUST_PROXY: undefined });
+    const forged = proxy(
+      reqWithHosts({ host: '127.0.0.1:3000', origin: 'http://evil.example', 'x-forwarded-host': 'evil.example' }, 'POST')
+    );
+    expect(forged.status).toBe(403);
+    const direct = proxy(reqWithHosts({ host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000' }, 'POST'));
+    expect(direct.status).toBe(200);
+  });
+
+  it('matches Origin against X-Forwarded-Host behind a trusted proxy', async () => {
+    const proxy = await loadProxy({ TRUST_PROXY: '1' });
+    const viaProxy = proxy(
+      reqWithHosts({ host: 'upstream:3000', origin: 'https://music.example.com', 'x-forwarded-host': 'music.example.com' }, 'POST')
+    );
+    expect(viaProxy.status).toBe(200);
+    const crossSite = proxy(
+      reqWithHosts({ host: 'upstream:3000', origin: 'https://evil.example', 'x-forwarded-host': 'music.example.com' }, 'POST')
+    );
+    expect(crossSite.status).toBe(403);
+  });
 });
 
 describe('clientIp', () => {

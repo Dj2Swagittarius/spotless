@@ -193,20 +193,33 @@ export function trustedProxyHops(): number {
 const HOST_PATTERN = /^(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::\d{1,5})?$/i;
 
 /**
- * Public origin of this request, for building absolute callback/redirect URLs. X-Forwarded-Host
- * is only believed behind a trusted proxy (TRUST_PROXY): a forged host would point OAuth
- * callbacks at an attacker's server. The scheme follows the same decision as secureCookieFor,
- * because a Secure cookie set alongside the redirect only travels back over https.
- * The Host header is preferred over nextUrl, which rewrites loopback addresses to "localhost":
- * a cookie set while browsing 127.0.0.1 would never reach a callback issued to localhost.
+ * The host[:port] the browser addressed, as every trust decision about a request's host should
+ * see it: the Host header (nextUrl rewrites loopback addresses to "localhost"), replaced by
+ * X-Forwarded-Host only behind a trusted proxy (TRUST_PROXY). Without TRUST_PROXY the forwarded
+ * header is client-controlled, so a forged value would point OAuth callbacks at an attacker's
+ * server or let a cross-site POST pass the CSRF origin check. Shared by requestOrigin and the
+ * proxy's CSRF check so both apply one policy. Empty when neither source yields a valid host.
  */
-export function requestOrigin(req: NextRequest): string {
+export function expectedHost(req: NextRequest): string {
   const hostHeader = req.headers.get('host')?.trim();
   let host = hostHeader && HOST_PATTERN.test(hostHeader) ? hostHeader : req.nextUrl.host;
-  let protocol = req.nextUrl.protocol;
   if (trustedProxyHops() > 0) {
     const forwardedHost = firstForwarded(req, 'x-forwarded-host');
     if (forwardedHost && HOST_PATTERN.test(forwardedHost)) host = forwardedHost;
+  }
+  return host;
+}
+
+/**
+ * Public origin of this request, for building absolute callback/redirect URLs. The host comes
+ * from expectedHost (X-Forwarded-Host only behind TRUST_PROXY). The scheme follows the same
+ * decision as secureCookieFor, because a Secure cookie set alongside the redirect only travels
+ * back over https.
+ */
+export function requestOrigin(req: NextRequest): string {
+  const host = expectedHost(req);
+  let protocol = req.nextUrl.protocol;
+  if (trustedProxyHops() > 0) {
     const forwardedProto = firstForwarded(req, 'x-forwarded-proto')?.toLowerCase();
     if (forwardedProto === 'http' || forwardedProto === 'https') protocol = `${forwardedProto}:`;
   }
