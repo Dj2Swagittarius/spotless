@@ -9,7 +9,6 @@ image with an SQLite database; your audio files stay where they are and are only
 Acknowledgements: Spotless builds on the original Spotless project by lateshift.tech (see [LICENSE](LICENSE));
 thanks to its authors and contributors for the foundation this version grows from.
 
-
 ![Home](docs/home.png)
 
 | Discover — suggestions, new releases, collection gaps | Artist pages |
@@ -36,234 +35,156 @@ connection and steps down when the network can't keep up:
 **Player**
 
 - Gapless playback and configurable crossfade (0–12s), dual-audio-element engine
-
-- Adaptive streaming quality (Auto): full quality on Wi-Fi, a lighter stream on mobile data,
-
-  and a step down the moment playback starts to stutter — the song resumes from where it was,
-
-  not from the top. Recovers a stream that dies mid-song instead of leaving it stalled
-
+- Adaptive streaming quality (Auto): full quality on Wi-Fi, a lighter stream on mobile data, and a step down
+  the moment playback starts to stutter — the song resumes from where it was, not from the top. Recovers a
+  stream that dies mid-song instead of leaving it stalled
 - Radio mode: any song seeds an endless queue of similar tracks from your own library
-
-- Queue with drag-to-reorder, shuffle, repeat (off/all/one), sleep timer
-
+- Queue with drag-to-reorder, shuffle, repeat (off/all/one), sleep timer; the queue survives a page reload
+- Keyboard shortcuts: <kbd>Space</kbd> play/pause, <kbd>←</kbd>/<kbd>→</kbd> seek 5s,
+  <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next, <kbd>M</kbd> mute, <kbd>/</kbd> search
 - ReplayGain volume normalization (read from tags)
-
-- 10-band graphic equalizer (31 Hz – 16 kHz, ±12 dB) with 13 presets or your own curve;
-
-  per device, and switching it off is an exact bypass
-
-- Internet radio: add any Icecast/Shoutcast stream by URL under **Radio** in the sidebar and it
-
-  plays through the same player (stations are exposed to Subsonic apps too)
-
-- Synced lyrics with **local sidecar `.lrc` files taking priority**, followed by cached/LRCLIB
-
-  fallback when no matching local lyrics file is available
-
+- 10-band graphic equalizer (31 Hz – 16 kHz, ±12 dB) with 13 presets or your own curve; per device, and
+  switching it off is an exact bypass
+- Internet radio: add any Icecast/Shoutcast stream by URL under **Radio** in the sidebar and it plays through
+  the same player (stations are exposed to Subsonic apps too)
+- Synced lyrics, with local sidecar `.lrc` files taking priority over the cache and LRCLIB
 - Media Session API: lock-screen / media-key controls
-
 - Full-screen mobile now-playing, mini-player, responsive layout, installable PWA manifest
 
 **Library**
 
-- Scans MP3, FLAC, M4A, AAC, OGG, OPUS, WAV; extracts tags + embedded album art
-
-- Smart artist matching: feature credits ("A feat. B"), case, diacritics (Tiësto = Tiesto) and
-
-  punctuation variants fold into one artist; self-healing dedupe runs on every scan
-
+- Scans MP3, FLAC, M4A, AAC, OGG, OPUS, WAV; extracts tags + embedded album art; multi-disc albums are
+  ordered by disc, then track
+- Smart artist matching: feature credits ("A feat. B"), case, diacritics (Tiësto = Tiesto) and punctuation
+  variants fold into one artist; self-healing dedupe runs on every scan
+- Renamed or moved files keep their likes, history and playlist entries
 - Home feed: recently played, top tracks, artist/genre/decade mixes, forgotten favorites, recently added
-
 - Search: fuzzy local search plus "not in your library" results from Deezer with 30-second previews
-
 - Playlists with drag-reorder and mosaic covers; liked songs; listening stats (tops, activity, periods)
-
 - Duplicate-file report (same song stored twice, e.g. MP3 + FLAC)
-
-- Album/artist artwork repair: local `cover`/`folder`/`front` images first, then conservative exact-match Deezer backfill; nightly database backups
-
-- Optional automatic library refresh from **Settings → Music library**: Off by default, or
-
-  every 5 / 15 / 30 minutes, 1 / 3 / 6 / 12 / 24 hours. Scans never overlap, unchanged
-
-  files are skipped using their modification time, and a manual rescan resets the next timer
-
-- Same-basename local `.lrc` sidecar support — for example `Song.flac` + `Song.lrc`.
-
-  Spotless reads local sidecars first; if none exists, playback/API lyrics fall back to the SQLite cache and LRCLIB
-
-- Optional **automatic synced `.lrc` download** from **Settings → Music library**. After every successful
-
-  library scan, Spotless checks tracks missing a sidecar, requests **synchronized lyrics only** from LRCLIB,
-
-  and saves them beside the audio file. Existing `.lrc`/`.LRC` files are never overwritten
+- Album/artist artwork repair: local `cover`/`folder`/`front` images first, then conservative exact-match
+  Deezer backfill
+- Optional automatic library refresh (**Settings → Music library**): off by default, or every 5 / 15 / 30
+  minutes, 1 / 3 / 6 / 12 / 24 hours. Scans never overlap, unchanged files are skipped by modification
+  time, and a manual rescan resets the timer
+- Optional automatic synced `.lrc` download (**Settings → Music library**): after each scan, tracks without
+  a sidecar get synchronized lyrics from LRCLIB saved beside the audio file. Existing `.lrc`/`.LRC` files
+  are never overwritten
+- Nightly, integrity-checked database backups
 
 **Multi-user**
 
-- Netflix-style "Who's listening?" profile picker with per-profile web authentication
-
-- Each profile signs in with its own password; passwords are never stored in plaintext
-
-- Opaque server-side sessions use an `HttpOnly`, `SameSite=Lax` cookie instead of trusting a profile ID from the browser
-
-- Per-profile likes, history, playlists, stats, discovery taste, and hidden artists
-
-- The first profile is the admin: server settings (music folder, scans, Lidarr) are hidden from and blocked (HTTP 403) for everyone else
-
-- Admin-only profile management is available from **Manage profiles** (`/users`): create profiles, set/reset passwords, and revoke a user's existing web sessions
-
-- Regular users can change only their own password and must provide their current password
-
-- Existing passwordless installations have a one-time migration path: profile 1 can claim the first admin password only while no web password exists anywhere in the database
+- Netflix-style "Who's listening?" profile picker; each profile signs in with its own password
+- Per-profile likes, history, playlists, stats, discovery taste, and hidden artists; playlists can only be
+  changed by the profile that owns them
+- The first profile is the admin: server settings (music folder, scans, Lidarr) are hidden from and blocked
+  (HTTP 403) for everyone else
+- **Manage profiles** (`/users`, admin only): create profiles, set/reset passwords, revoke sessions
+- See [Web authentication](#web-authentication-and-profile-management) for how sessions and passwords work
 
 **AI DJ** (local by default; nothing leaves your server unless you pick a hosted provider)
 
-- Chat with a music-nerd DJ that knows each profile's library, play history, likes, Spotify taste and Discover picks
-
-- "Start my DJ" builds a set from your library and plays it; ask for a mood, an artist, a genre, or a playlist and it does it
-
+- Chat with a music-nerd DJ that knows each profile's library, play history, likes, Spotify taste and
+  Discover picks
+- "Start my DJ" builds a set from your library and plays it; ask for a mood, an artist, a genre, or a
+  playlist and it does it
 - Creates playlists for you; songs you don't own are kept as placeholders that fill in after a future scan
-
 - Suggests songs you don't have yet, with Deezer previews and a one-click Lidarr add
-
 - Talks: speaks its replies and introduces songs between tracks (music ducks while it talks), like a radio host
-
 - Push-to-talk voice input through a local Whisper server
-
-- Brains: LM Studio (default) or Ollama, both local, any OpenAI-compatible server, or OpenAI, Anthropic, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter
-
+- Brains: LM Studio (default) or Ollama, both local, any OpenAI-compatible server, or OpenAI, Anthropic,
+  Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter
 - Voice: a local speech server such as Kokoro-FastAPI (default), on-device browser voices, or OpenAI / ElevenLabs
 
 **Discovery** (no API keys needed — Deezer + Apple RSS public endpoints)
 
 - Per-profile artist suggestions based on listening history, with "not interested" dismissals
-
 - New releases from artists you already have
-
 - "Complete your collection": studio albums you're missing, repackage/remix noise filtered out
-
 - Trending: country charts with region picker, genre rows, "trending for you" genre blend
 
 **Mobile apps (Subsonic / OpenSubsonic API)**
 
-- Spotless implements the Subsonic API, so mature native apps work out of the box:
-
-  **Amperfy (iOS)**, **Symfonium**, **DSub**, **Substreamer**, **play:Sub** and friends — with
-
-  the offline download/sync those apps provide
-
-- Lyrics API support includes both the legacy Subsonic **`getLyrics`** endpoint for plain-text
-
-  lyrics and OpenSubsonic **`getLyricsBySongId`** via the **`songLyrics` v1** extension for
-
-  structured synchronised lyrics
-
-- Compatible clients such as **Amperfy** can receive synced lyrics automatically through the
-
-  Subsonic/OpenSubsonic API; local same-basename `.lrc` files are preferred over LRCLIB results
-
-- On-the-fly **transcoding** via ffmpeg (mp3/ogg/opus/aac, client-requested bitrate) for
-
-  streaming big FLAC libraries over mobile data
-
-- Each profile gets its own generated app password (Settings → Mobile apps); stars,
-
-  scrobbles and playlists from the app land on the right profile
+- Native apps work out of the box — **Amperfy (iOS)**, **Symfonium**, **DSub**, **Substreamer**,
+  **play:Sub** and friends — with the offline download/sync those apps provide
+- Synced lyrics via OpenSubsonic `getLyricsBySongId` (`songLyrics` v1) and plain lyrics via legacy `getLyrics`
+- On-the-fly **transcoding** via ffmpeg (mp3/ogg/opus/aac, client-requested bitrate) for streaming big FLAC
+  libraries over mobile data; files that already fit the requested quality are served as-is
+- Each profile gets its own generated app password (Settings → Mobile apps); stars, scrobbles, playlists
+  and recently-played land on the right profile
 
 **Integrations** (optional)
 
-- **Lidarr**: one-click add + search for a whole artist or one specific album; live download
-
-  queue widget; webhook triggers a library rescan when imports finish.
-
-  Non-admin profiles don't download directly — they file requests, and the admin
-
-  approves or denies them from a queue on the Discover page.
-
-- **Spotify**: per-profile PKCE connect imports your taste (top + saved artists) to seed
-
-  discovery, and can rebuild your Spotify playlists from matching local files. Requires
-
-  creating a (free) Spotify app and setting `SPOTIFY_CLIENT_ID`.
-
-  The OAuth callback supports both the default loopback URL and a configurable HTTPS
-
-  reverse-proxy domain through **Settings → Spotify** or the `SPOTIFY_REDIRECT_URI`
-
-  environment variable
-
-- **Last.fm**: the admin pastes a Last.fm API key + shared secret once (Settings → Last.fm),
-
-  then each profile connects its own account. Every play from the web player and from
-
-  Subsonic apps is scrobbled, with now-playing updates, to whoever is listening.
+- **Lidarr**: one-click add + search for a whole artist or one specific album; live download queue widget;
+  webhook triggers a library rescan when imports finish. Non-admin profiles file requests instead, which
+  the admin approves or denies from a queue on the Discover page
+- **Spotify**: per-profile PKCE connect imports your taste (top + saved artists) to seed discovery, and can
+  rebuild your Spotify playlists from matching local files. Needs a free Spotify app (see
+  [Spotify setup](#spotify-setup-optional))
+- **Last.fm**: the admin enters an API key once, then each profile connects its own account. Plays from the
+  web player and Subsonic apps are scrobbled (with now-playing updates) to whoever is listening
 
 ## Quick start (Docker)
 
-1. Edit `docker-compose.yml` — point the music volume at your library:
+1. Edit `docker-compose.yml` and point both music volumes at your library:
 
-```yaml
+   ```yaml
+   volumes:
+     # scanning and streaming are read-only
+     - /path/to/your/music:/music:ro
+     # same folder again, used only to write generated .lrc lyrics (optional)
+     - /path/to/your/music:/music-write:rw
+     - ./data:/data
+   ```
 
-environment:
+   Other settings go in the `environment:` block or in a `.env` file next to the compose file (copy
+   `.env.example`); see [Configuration](#configuration).
 
- - MUSIC_WRITE_DIR=/music-write
+2. Start it. The compose file references the prebuilt multi-arch image (amd64 + arm64) on GHCR:
 
-volumes:
+   ```bash
+   docker compose pull && docker compose up -d
+   ```
 
- # Normal scanning/streaming access remains read-only.
+   Or build from source with `docker compose up -d --build`.
 
- - /path/to/your/music:/music:ro
-
- # Same library mounted separately for the optional generated .lrc writer.
-
- - /path/to/your/music:/music-write:rw
-
- - ./data:/data
-
-```
-
-2. Build and run:
-
-```bash
-
-docker compose up -d --build
-
-```
-
-3. Open `http://<server-ip>:3000` — a setup wizard walks you through creating the first profile
-
-   (which becomes the admin) **and its web password**, scanning your library, and the optional
-
-   Lidarr and Spotify hookups. Every step is skippable except establishing the initial admin
-
-   authentication needed to protect the web UI.
+3. Open `http://<server-ip>:3000`. A setup wizard walks you through creating the first profile (which
+   becomes the admin) and its web password, scanning your library, and the optional Lidarr and Spotify
+   hookups. Every step except the admin password can be skipped.
 
    ![Setup wizard](docs/setup.png)
 
-## Run the prebuilt image
+**Data folder ownership.** On first start the container runs as root just long enough to make the
+bind-mounted `./data` folder writable (Docker creates it root-owned), then drops to an unprivileged user. Set
+`PUID` / `PGID` to the uid/gid that should own `./data` (defaults `1000` / `1000`; `id -u` and `id -g` print
+yours). Only `/data` (and `BACKUP_DIR`, when it points at a separate mount) is ever chowned; your music mount is never touched.
 
-CI publishes a multi-arch image (amd64 + arm64) to `ghcr.io/dj2swagittarius/spotless:latest`; tagged releases
-also get `:<major>.<minor>` and `:<version>` tags. The supplied `docker-compose.yml` already references it, so
-instead of building locally you can:
+**Health check.** The image includes a `HEALTHCHECK` against `GET /api/health`, which returns
+`200 { "ok": true }` while the database is reachable and `503` otherwise.
 
-**Versions.** The running version is shown in Settings → About (with the build commit), returned by `/api/health`,
-and reported to Subsonic apps as `serverVersion`. Every release is a git tag `vX.Y.Z` with notes on the
-[releases page](https://github.com/Dj2Swagittarius/spotless/releases) and a matching image tag. `:latest` follows
-`main`; to stay on a release line instead, pin the image in `docker-compose.yml`, for example
-`image: ghcr.io/dj2swagittarius/spotless:0.2` (patch updates only) or `:0.2.0` (frozen).
+**Optional local voice for the AI DJ.** `docker-compose.voice.yml` runs Kokoro (speech) and Speaches
+(Whisper) next to Spotless; the comments at the top of that file list the values to enter in
+Settings → AI DJ:
 
 ```bash
-docker compose pull && docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.voice.yml up -d
 ```
 
-On first start the container runs as root just long enough to make the bind-mounted `./data` folder writable
-(Docker creates it root-owned), then drops to an unprivileged user. Set `PUID` / `PGID` in the `environment:`
-block to the uid/gid that should own `./data` (the defaults are `1000` / `1000`; `id -u` and `id -g` print yours).
-Only `/data` (and `BACKUP_DIR`, when it points at a separate mount) is ever chowned; your music mount is never touched.
+## Versions and updates
 
-The image includes a `HEALTHCHECK` against `GET /api/health`, which returns `200 { "ok": true }` while the
-database is reachable and `503` otherwise, so `docker ps` and orchestrators can see when Spotless is actually up.
+The running version is shown in Settings → About (with the build commit), returned by `/api/health`, and
+reported to Subsonic apps as `serverVersion`. Each release is a git tag `vX.Y.Z` with notes on the
+[releases page](https://github.com/Dj2Swagittarius/spotless/releases) and in [CHANGELOG.md](CHANGELOG.md).
+
+| Image tag | Follows |
+| --- | --- |
+| `:latest` | every push to `main` |
+| `:0.2` | patch releases of 0.2 |
+| `:0.2.0` | that exact release |
+
+To stay on a release line, change the `image:` line in `docker-compose.yml`. Update with
+`docker compose pull && docker compose up -d`. Read the changelog before moving to a new minor version:
+entries marked **Breaking** may need a config change.
 
 ## Configuration
 
@@ -292,7 +213,7 @@ database is reachable and `503` otherwise, so `docker ps` and orchestrators can 
 | `BACKUP_DIR` | `DATA_DIR/backups` | Where the daily database backups are written. In Docker it may be its own mount (e.g. `./backups:/backups`); the entrypoint makes it writable by `PUID`/`PGID` the same way as `/data` |
 | `LOG_LEVEL` | `info` | Server log verbosity: `debug`, `info`, `warn` or `error` |
 | `HOSTNAME` | `0.0.0.0` | Bind address of the production server |
-| `PUID` / `PGID` | `1000` / `1000` | Docker only: uid/gid that owns `/data` (and a separate `BACKUP_DIR`) and runs the app (see *Run the prebuilt image*) |
+| `PUID` / `PGID` | `1000` / `1000` | Docker only: uid/gid that owns `/data` (and a separate `BACKUP_DIR`) and runs the app (see *Data folder ownership* above) |
 
 Automatic library refresh is configured inside **Settings → Music library** and is stored
 in `DATA_DIR/library.db`; no environment variable is required. The default is **Off**.
@@ -322,233 +243,99 @@ unauthenticated. Keep that endpoint restricted to a trusted network or set a web
 
 ### Web authentication and profile management
 
-Spotless uses normal username/profile + password authentication for the web UI.
+Each profile signs in to the web UI with its own password.
 
-- The browser receives only an opaque random session cookie named `spotless_session`.
-
-- The session cookie is `HttpOnly` and `SameSite=Lax`; it is also marked `Secure` when Spotless detects HTTPS.
-
-- Authentication state is validated server-side against SQLite. The old plain `uid` cookie is not trusted as authentication.
-
-- Web passwords are hashed with Node's memory-hard `scrypt`; plaintext web passwords are never stored.
-
-- Login attempts are progressively rate-limited after repeated failures. Without `TRUST_PROXY` the limit is per profile (so failed guesses from anyone can briefly delay that profile's sign-in); with `TRUST_PROXY` set to your proxy hop count it is per profile and client IP.
-
-- Password checks run off the main thread and at most two at a time; excess sign-in attempts get HTTP 429, so a login flood can't stall playback.
-
-- Mutating `/api/*` requests are protected by same-origin checks in addition to the SameSite cookie policy.
-
-- Password changes/resets revoke the affected user's existing web sessions.
-
-- The Lidarr webhook and Subsonic/OpenSubsonic `/rest/*` authentication remain separate from browser-session authentication.
+- The browser receives only an opaque random session cookie, `spotless_session`: `HttpOnly`,
+  `SameSite=Lax`, and `Secure` when Spotless detects HTTPS. Sessions are validated server-side against SQLite.
+- Web passwords are hashed with Node's memory-hard `scrypt`; plaintext passwords are never stored.
+- Failed logins are progressively rate-limited: per profile, or per profile and client IP when
+  `TRUST_PROXY` is set. Password checks run off the main thread, at most two at a time, and excess attempts
+  get HTTP 429, so a login flood can't stall playback.
+- Mutating `/api/*` requests are protected by same-origin checks on top of the SameSite cookie policy.
+- Password changes and resets revoke that profile's existing web sessions.
+- The Lidarr webhook and Subsonic `/rest/*` authentication are separate from browser sessions.
 
 #### Creating and managing users
 
-The first profile is the administrator.
-
-Open the profile menu and choose **Manage profiles**, or go directly to:
-
-```text
-
-/users
-
-```
-
-The admin can:
+The first profile is the administrator. Open the profile menu and choose **Manage profiles** (or go to
+`/users`) to:
 
 - create new profiles and assign their initial passwords
+- set or reset passwords for existing profiles (which also signs that profile out everywhere)
 
-- set or reset passwords for existing profiles
-
-- revoke a user's existing browser sessions by resetting that user's password
-
-Non-admin profiles can change only their own password, and must enter their current password.
-
+Non-admin profiles can change only their own password, and must enter their current one.
 
 #### Upgrading an existing passwordless installation
 
-Back up the database before upgrading:
+Back up the database first:
 
 ```bash
-
 cp ./data/library.db ./data/library.db.pre-auth-backup
-
 ```
 
-After rebuilding and starting the new version:
+After starting the new version:
 
-1. Open Spotless normally.
+1. Open Spotless and select profile 1 (the existing admin).
+2. If no web password has ever been configured, Spotless offers a one-time **Create admin password** flow.
+   Set a password or PIN (at least `AUTH_MIN_PASSWORD_LENGTH` characters, default 4).
+3. Sign in, open **Manage profiles**, and assign passwords to the other profiles. They stay locked until you do.
 
-2. Select profile 1 (the existing admin).
-
-3. If the database contains existing profiles but **no web password has ever been configured**, Spotless offers a one-time **Create admin password** flow.
-
-4. Create an admin password or PIN (at least `AUTH_MIN_PASSWORD_LENGTH` characters, default 4).
-
-5. Sign in and open **Manage profiles**.
-
-6. Assign passwords to the other existing profiles.
-
-Existing non-admin profiles remain locked until the admin assigns them a web password.
-
-The one-time admin claim is available only while profile 1 has no password and there are no configured web passwords anywhere in the database. Once the first admin password has been created, that bootstrap path is closed.
-
-Do this migration while the old passwordless installation is still restricted to a trusted network.
+The one-time claim is available only while no web password exists anywhere in the database, and closes as
+soon as the first one is set. Do this while the server is still restricted to a trusted network: whoever
+opens the picker first can claim the admin profile.
 
 #### HTTPS and secure cookies
 
-Authentication protects the application account boundary, but it does **not** replace transport encryption.
+Authentication does **not** replace transport encryption. For remote access, use HTTPS through a reverse
+proxy or a private network/VPN such as Tailscale or WireGuard; never expose plain HTTP to the internet.
 
-For remote access, use HTTPS through a reverse proxy or use a private network/VPN such as Tailscale or WireGuard. Do not expose plain HTTP directly to the public Internet.
-
-If Spotless is behind an HTTPS reverse proxy, make sure the proxy forwards the original host/protocol, including:
-
-```text
-
-X-Forwarded-Proto: https
-
-```
-
-Spotless will then automatically use a `Secure` session cookie.
-
-If your proxy setup prevents protocol detection, you can force secure cookies:
-
-```yaml
-
-environment:
-
-  - AUTH_SECURE_COOKIE=true
-
-```
-
-Do **not** force `AUTH_SECURE_COOKIE=true` when accessing Spotless directly over plain HTTP, because browsers will not send a Secure cookie over HTTP.
+Behind an HTTPS reverse proxy, forward the original host and protocol (`X-Forwarded-Proto: https`) and
+Spotless switches to a `Secure` cookie automatically. If your proxy setup prevents detection, force it with
+`AUTH_SECURE_COOKIE=true` — but not when you reach Spotless over plain HTTP, because browsers won't send a
+`Secure` cookie there.
 
 ### Connecting a mobile app
 
-Open **Settings → Mobile apps** on the profile you want to use — it shows the server URL,
+Open **Settings → Mobile apps** on the profile you want to use. It shows the server URL, username and a
+generated app password; add those as a Subsonic server in Amperfy, Symfonium, DSub, Substreamer, play:Sub
+or any other compatible client. Downloads/offline mode and bitrate choices are handled by the app.
 
-username and a generated app password. Add those as a Subsonic server in Amperfy, Symfonium,
-
-DSub, Substreamer, play:Sub or any other compatible client.
-
-Spotless supports both:
-
-- Legacy Subsonic **`getLyrics`** for plain-text lyrics
-
-- OpenSubsonic **`getLyricsBySongId`** through **`songLyrics` v1** for synchronized,
-
-  timestamped lyrics
-
-When synchronized lyrics are requested, Spotless first looks for a same-basename `.lrc`
-
-file beside the audio file:
+Lyrics are served through legacy Subsonic `getLyrics` (plain text) and OpenSubsonic `getLyricsBySongId`
+(`songLyrics` v1, synchronized). For synced lyrics Spotless first looks for a same-basename `.lrc` beside
+the audio file, then its cache, then LRCLIB:
 
 ```text
-
 /music/Artist/Album/Song.flac
-
 /music/Artist/Album/Song.lrc
-
 ```
 
-If a local `.lrc` exists, it takes priority. Otherwise Spotless uses its cached lyrics and
-
-falls back to LRCLIB. Compatible apps such as **Amperfy** can therefore display synchronized
-
-lyrics directly from your local music library.
-
-If **Automatic synced lyrics sidecars** is enabled in Settings, Spotless also persists missing
-
-synchronized LRCLIB results as same-basename `.lrc` files after each successful library scan.
-
-Only `syncedLyrics` is written; plain-only results are not written as `.lrc`.
-
-Downloads/offline mode and bitrate/transcoding options are handled by the client app.
-
+With **Automatic synced lyrics sidecars** enabled, missing synchronized LRCLIB results are also saved as
+`.lrc` files after each library scan (plain-only results are not written).
 
 ### Spotify setup (optional)
 
 1. Create an app at <https://developer.spotify.com/dashboard>.
-
 2. Set `SPOTIFY_CLIENT_ID` to the app's client ID (no secret needed — Spotless uses PKCE).
-
-3. Choose the callback you will use:
-
-  - **Local/default:** `http://127.0.0.1:3000/api/spotify/callback`
-  
-  - **Reverse proxy:** open **Settings → Spotify** as the admin and enter your public domain,
-  
-       for example:
-  
-  ```text
-  
-   music.example.com
-  
-  ```
-  
-       Spotless will automatically use:
-  
-  ```text
-  
-   https://music.example.com/api/spotify/callback
-  
-  ```
-  
-  - Alternatively, set the deployment-level `SPOTIFY_REDIRECT_URI` environment variable to
-  
-       the complete callback URI:
-  
-  ```text
-  
-   SPOTIFY_REDIRECT_URI=https://music.example.com/api/spotify/callback
-  
-  ```
-  
-  - A domain saved in **Settings → Spotify** takes precedence over
-  
-       `SPOTIFY_REDIRECT_URI`. If neither is configured, Spotless falls back to
-  
-       `http://127.0.0.1:3000/api/spotify/callback`.
-
-4. Add the **exact** callback URI shown in Settings to your Spotify app's Redirect URIs.
-
-   For example:
-
-```text
-
-https://music.example.com/api/spotify/callback
-
-```
-
-   Spotify requires HTTPS for non-loopback web redirects. Plain HTTP is supported for
-
-   loopback IP literals such as `127.0.0.1`.
-
-5. Click **Connect Spotify**. If a public callback domain is configured and you opened
-
-   Spotless through a LAN/IP address, Spotless redirects the browser to the configured
-
-   public origin with a single-use, two-minute link that carries your signed-in profile, so
-
-   you don't need to be signed in on that origin. The OAuth state and target profile are kept
-
-   server-side; the browser can't choose which profile the Spotify account is attached to.
-
-   You land on the public origin afterwards; sign in there once if you want to keep using it.
-
-6. While the Spotify app is in development mode, add each Spotify account that will connect
-
-   under User Management in the Spotify developer dashboard.
-
+3. Choose the callback URI. In order of precedence:
+   - a public domain entered in **Settings → Spotify** (admin), e.g. `music.example.com`, which becomes
+     `https://music.example.com/api/spotify/callback`
+   - the `SPOTIFY_REDIRECT_URI` environment variable, set to the full callback URI
+   - the loopback default, `http://127.0.0.1:3000/api/spotify/callback`
+4. Add the **exact** callback URI shown in Settings to your Spotify app's Redirect URIs. Spotify requires
+   HTTPS for anything except loopback IP literals such as `127.0.0.1`.
+5. Click **Connect Spotify**. If a public domain is configured and you opened Spotless via a LAN address,
+   you're sent to the public origin with a single-use, two-minute link carrying your signed-in profile. The
+   OAuth state and target profile stay server-side, so the browser can't choose which profile the Spotify
+   account attaches to.
+6. While the Spotify app is in development mode, add each Spotify account that will connect under User
+   Management in the Spotify developer dashboard.
 
 ### Last.fm setup (optional)
 
-1. Create a free API account at <https://www.last.fm/api/account/create> (any name, callback URL can stay blank)
-
-2. As the admin profile, paste the API key and shared secret into **Settings → Last.fm** and hit **Test & save**
-
-3. Each profile then clicks **Connect Last.fm** on the same page to link its own account
-
+1. Create a free API account at <https://www.last.fm/api/account/create> (any name; the callback URL can
+   stay blank).
+2. As the admin, paste the API key and shared secret into **Settings → Last.fm** and hit **Test & save**.
+3. Each profile then clicks **Connect Last.fm** on the same page to link its own account.
 
 ### AI DJ
 
@@ -559,6 +346,8 @@ Open **Settings → AI DJ** as the admin profile. Everything defaults to servers
 2. **Voice:** run a local OpenAI-compatible speech server, for example [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI): `docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest` (GPU images exist). Model `kokoro`, voice e.g. `am_michael`. **Browser voice** uses only on-device voices; **Off** keeps the DJ text-only.
 
 3. **Listening:** push-to-talk needs a local Whisper server with an OpenAI-style `/v1/audio/transcriptions` endpoint, such as [Speaches](https://github.com/speaches-ai/speaches) (`Systran/faster-whisper-small`). Some servers need the model downloaded first; see their docs. Browsers only allow the mic over HTTPS or on localhost. The browser's built-in speech recognition is not used because Chrome sends that audio to Google.
+
+   Or run both with `docker-compose.voice.yml` (see [Quick start](#quick-start-docker)).
 
 4. Hosted providers (OpenAI, Anthropic, Gemini, Mistral, DeepSeek, xAI, Groq, OpenRouter, ElevenLabs) are optional. The settings page warns when a choice sends data off your server. API keys are stored in the database and never sent back to the browser.
 
@@ -607,59 +396,50 @@ CI runs typecheck, lint, the unit tests and the production build on every pull r
 enforced yet because a repo-wide format has never been run (see CONTRIBUTING.md). `GET /api/health` is handy
 while developing: it answers `200` once the server and database are up.
 
+**Releasing.** Add notes under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) as you go, then:
+
+```bash
+npm run release -- patch
+```
+
+That bumps `package.json`, dates the changelog section, commits `Release vX.Y.Z` and tags it (`--dry-run`
+previews). Push with `git push origin main --follow-tags`; CI publishes the `:X.Y.Z` / `:X.Y` image tags
+and creates the GitHub Release from the changelog section.
+
 ## Security model — read this
 
-Spotless now has web authentication, but secure deployment still matters.
+Spotless has web authentication (see [above](#web-authentication-and-profile-management)), but secure
+deployment still matters.
 
-**Web UI authentication**
+**Network**
 
-- Every web profile has its own password.
+- Authentication does not make plain HTTP safe on an untrusted network. For remote access use HTTPS through
+  a reverse proxy, or a private network/VPN such as Tailscale or WireGuard. Internet-facing: authentication +
+  HTTPS is the minimum; a VPN layer is a useful extra boundary.
+- `/api/lidarr/webhook` is callable without a browser session. If it's reachable outside a trusted network,
+  set `LIDARR_WEBHOOK_SECRET`.
+- Internet radio stations on loopback/LAN/link-local IP addresses are refused unless
+  `ALLOW_PRIVATE_STREAM_URLS=1`, so the station proxy can't be used to reach other services on your network.
 
-- Web passwords are stored only as memory-hard `scrypt` hashes.
+**Passwords**
 
-- Browser authentication uses an opaque server-side session cookie; the browser does not authenticate by supplying a profile ID.
+A 4-digit PIN is accepted by default for convenience on a home network. Throttling slows guessing to roughly
+a hundred attempts per profile per day: enough on a LAN, not a real barrier on the internet. If Spotless is
+reachable from the internet, set `AUTH_MIN_PASSWORD_LENGTH=12` (or higher) and use long, unique passphrases.
 
-- Session cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` on HTTPS.
+**Data**
 
-- Protected `/api/*` endpoints require a valid server-side session.
+- `DATA_DIR/library.db` holds session state, password hashes, Subsonic app passwords (which compatible
+  clients need in recoverable form) and API keys. Protect it, its backups in `DATA_DIR/backups`, and the
+  host filesystem accordingly.
+- Stored session values are not the raw browser tokens, and password hashes are not passwords.
+- Music is mounted read-only at `/music`. The optional `/music-write` mount is used only to create new `.lrc`
+  files; existing lyric files are never overwritten.
 
-- Cross-site state-changing API requests are rejected.
+**Browser codecs:** FLAC/OGG/OPUS playback depends on browser support (fine in Chromium/Firefox; Safari lacks
+OGG/OPUS). Pick an MP3 tier or Auto in Settings → Playback for those files on Safari.
 
-- Repeated failed logins are progressively rate-limited (per profile, or per profile and IP with `TRUST_PROXY`).
-
-- Password resets revoke the affected profile's active web sessions.
-
-- Profile 1 is the admin; admin-only API operations are still checked server-side.
-
-**Network security**
-
-Web authentication does not make unencrypted HTTP safe on an untrusted network. For remote access, use HTTPS through a reverse proxy or a private VPN/network such as Tailscale or WireGuard.
-
-Do not publicly expose Spotless over plain HTTP.
-
-**Database and protocol notes**
-
-- `DATA_DIR/library.db` contains authentication/session state and other private application data. Protect the database file, its backups, and the host filesystem from unauthorized access.
-
-- Web password hashes are not plaintext passwords, and stored web-session values are not the raw browser session tokens.
-
-- The Subsonic/OpenSubsonic mobile-app authentication mechanism is separate from web authentication. Generated mobile app passwords must remain usable by compatible clients, so continue to treat `library.db` as sensitive data.
-
-- `/api/lidarr/webhook` remains callable by Lidarr without a browser session. If it is reachable outside a trusted network, configure `LIDARR_WEBHOOK_SECRET`.
-
-- Nightly DB backups are kept in `DATA_DIR/backups` (or `BACKUP_DIR`; last 7); protect those backups with the same care as the live database.
-
-- Normal Spotless scanning/streaming access stays read-only at `/music`. If automatic synced sidecars are enabled, the optional `/music-write` mount allows Spotless to create new `.lrc` files only; existing lyric files are not overwritten.
-
-- FLAC/OGG/OPUS playback depends on browser codec support (fine in Chromium/Firefox; Safari lacks OGG/OPUS).
-
-**Password guidance**
-
-A 4-digit PIN is accepted by default for convenience on a home network. Throttling slows guessing to roughly a hundred attempts per profile per day, which is enough on a LAN but not a real barrier for an internet-facing server. If Spotless is reachable from the internet, set `AUTH_MIN_PASSWORD_LENGTH=12` (or higher) and use long, unique passphrases.
-
-**Upgrading from a passwordless version:** the first person to open the profile picker after the upgrade can claim the admin profile by setting its password. If your server was reachable by people you don't trust, do the upgrade and claim the admin password yourself immediately.
-
-For Internet-facing access, authentication + HTTPS is the minimum recommended deployment. A VPN/private-network layer is still a useful additional boundary for a self-hosted personal server.
+See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## About
 
