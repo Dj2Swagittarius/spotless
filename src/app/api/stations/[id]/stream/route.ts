@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getStation, streamUrlError, assertPublicStreamUrl } from '@/lib/stations';
+import { USER_AGENT } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   let upstream: Response;
   try {
     upstream = await fetch(station.streamUrl, {
-      headers: { 'User-Agent': 'Spotless/1.0', Accept: '*/*' },
+      headers: { 'User-Agent': USER_AGENT, Accept: '*/*' },
       redirect: 'follow',
       signal: ac.signal,
     });

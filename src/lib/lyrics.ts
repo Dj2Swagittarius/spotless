@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDb, getSetting, setSetting } from './db';
+import { USER_AGENT } from './version';
 
 export type LyricLine = {
   start?: number;
@@ -67,7 +68,7 @@ const TIME_TAG = /\[(\d+):([0-5]?\d)(?:[.:](\d{1,3}))?\]/g;
 const ENHANCED_WORD_TAG = /<\d+:[0-5]?\d(?:[.:]\d{1,3})?>/g;
 const META_TAG = /^\[(?:ar|al|ti|au|lr|by|length|offset|re|tool|ve|la):.*\]\s*$/i;
 
-const LRCLIB_USER_AGENT = 'Spotless/0.1.0 (https://github.com/Dj2Swagittarius/spotless)';
+const LRCLIB_USER_AGENT = USER_AGENT;
 const LRCLIB_TIMEOUT_MS = 15_000;
 const LRCLIB_BATCH_DELAY_MS = 350;
 const MISSING_SYNC_RETRY_MS = 7 * 24 * 60 * 60 * 1000;

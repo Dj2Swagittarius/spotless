@@ -6,7 +6,7 @@ name: Build and publish container image
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v[0-9]*']
   workflow_dispatch:
 
 concurrency:
@@ -66,14 +66,14 @@ jobs:
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      # main -> latest + sha; v1.2.3 tag -> 1.2.3, 1.2 and latest.
+      # main -> latest + sha; v1.2.3 tag -> 1.2.3 and 1.2 (latest follows main only, never a tag).
       - name: Derive tags
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
             type=ref,event=tag
             type=semver,pattern={{version}}
@@ -87,5 +87,51 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # A vX.Y.Z tag (created by `npm run release`) becomes a GitHub Release once its image is
+  # published, with that version's CHANGELOG section as the notes.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check that the tag matches package.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag v$TAG does not match package.json version $PKG — use npm run release" >&2
+            exit 1
+          fi
+
+      - name: Collect release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          node scripts/release.mjs --notes "$VERSION" > notes.md
+          echo >> notes.md
+          case "$VERSION" in
+            *-*) echo "**Container image:** \`$IMAGE:$VERSION\` (pre-release; \`:latest\` is unchanged)" >> notes.md ;;
+            *)   echo "**Container image:** \`$IMAGE:$VERSION\` (also \`:${VERSION%.*}\`)" >> notes.md ;;
+          esac
+          cat notes.md
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          EXTRA=""
+          case "$GITHUB_REF_NAME" in *-*) EXTRA="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Spotless $GITHUB_REF_NAME" --notes-file notes.md $EXTRA

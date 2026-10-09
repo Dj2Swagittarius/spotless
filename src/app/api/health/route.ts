@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { scanStatus } from '@/lib/scanner';
-import pkg from '../../../../package.json';
+import { APP_COMMIT, APP_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,7 @@ export async function GET() {
 
   const scan = scanStatus();
   return NextResponse.json(
-    { ok: true, scanning: scan.scanning, lastScanAt: scan.lastScan?.at ?? null, version: pkg.version },
+    { ok: true, scanning: scan.scanning, lastScanAt: scan.lastScan?.at ?? null, version: APP_VERSION, commit: APP_COMMIT },
     { headers: NO_STORE }
   );
 }

@@ -247,6 +247,12 @@ CI publishes a multi-arch image (amd64 + arm64) to `ghcr.io/dj2swagittarius/spot
 also get `:<major>.<minor>` and `:<version>` tags. The supplied `docker-compose.yml` already references it, so
 instead of building locally you can:
 
+**Versions.** The running version is shown in Settings → About (with the build commit), returned by `/api/health`,
+and reported to Subsonic apps as `serverVersion`. Every release is a git tag `vX.Y.Z` with notes on the
+[releases page](https://github.com/Dj2Swagittarius/spotless/releases) and a matching image tag. `:latest` follows
+`main`; to stay on a release line instead, pin the image in `docker-compose.yml`, for example
+`image: ghcr.io/dj2swagittarius/spotless:0.2` (patch updates only) or `:0.2.0` (frozen).
+
 ```bash
 docker compose pull && docker compose up -d
 ```
