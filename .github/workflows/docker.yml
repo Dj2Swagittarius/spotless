@@ -69,7 +69,7 @@ jobs:
       # main -> latest + sha; v1.2.3 tag -> 1.2.3 and 1.2 (latest follows main only, never a tag).
       - name: Derive tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
