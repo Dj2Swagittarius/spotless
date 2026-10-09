@@ -7,6 +7,7 @@ interface SpotifyPlaylistInfo {
   id: string;
   name: string;
   trackCount: number;
+  owned?: boolean;
 }
 
 interface ImportResult {
@@ -100,6 +101,12 @@ export default function SpotifyImport({ onClose, onImported }: { onClose: () => 
                     <div className="truncate font-semibold">{p.name}</div>
                     <div className="text-sm text-subdued">
                       {p.trackCount > 0 ? `${p.trackCount} songs on Spotify` : 'Spotify playlist'}
+                      {p.owned === false && (
+                        <span title="Since February 2026 Spotify only shares the songs of playlists you own or collaborate on">
+                          {' '}
+                          · not yours, Spotify won&apos;t share its songs
+                        </span>
+                      )}
                     </div>
                   </div>
                   {r ? (
