@@ -1,5 +1,5 @@
 # ---- build stage ----
-FROM node:22-bookworm-slim AS builder
+FROM node:25-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -13,7 +13,7 @@ ENV GIT_SHA=$GIT_SHA
 RUN npm run build
 
 # ---- runtime stage ----
-FROM node:22-bookworm-slim AS runner
+FROM node:25-bookworm-slim AS runner
 WORKDIR /app
 
 # ffmpeg powers on-the-fly transcoding for Subsonic mobile clients;
