@@ -20,6 +20,13 @@ export class HttpError extends Error {
 /** Page-level data state. 'notfound' is a 404 from the API; 'error' is anything else that failed. */
 export type LoadStatus = 'loading' | 'error' | 'notfound' | 'ready';
 
+/**
+ * Fetches `url` and parses the JSON body, rejecting with HttpError for any non-2xx response.
+ *
+ * A 204 or an empty 2xx body resolves with `undefined` (typed as T, so callers that expect a
+ * body keep their existing signature); check for it where an endpoint can legitimately answer
+ * with no content instead of letting `res.json()` turn it into a parse error.
+ */
 export async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -35,7 +42,9 @@ export async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
     }
     throw new HttpError(res.status, body, url);
   }
-  return (await res.json()) as T;
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 /** True for the rejection fetch produces when its AbortController fires; callers ignore those. */

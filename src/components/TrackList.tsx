@@ -83,7 +83,12 @@ function MoveButtons({ i, count, title, onMove }: { i: number; count: number; ti
   );
 }
 
-/** Stable per-row keys: a playlist can hold the same song twice, so the id alone is not unique. */
+/**
+ * Stable per-row keys. Tracks and placeholders have separate id spaces, so the prefix keeps a song
+ * and a placeholder with the same numeric id apart. The schema forbids the same track twice in one
+ * playlist (PRIMARY KEY (playlist_id, track_id)); the `#n` suffix is only a guard so a duplicate from
+ * any future source (or an ad-hoc list) still gets a unique key instead of a React warning.
+ */
 function rowKeys(tracks: Track[]): string[] {
   const seen = new Map<string, number>();
   return tracks.map((t) => {

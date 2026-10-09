@@ -97,6 +97,9 @@ export default function TrendingPage() {
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [attempt, setAttempt] = useState(0);
   const [country, setCountry] = useState('ww');
+  // separate from `status`: a region change reloads only the chart while the rest of the page stays up,
+  // and an empty chart after the reload means "unavailable", not "still loading"
+  const [chartLoading, setChartLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [lidarrConfigured, setLidarrConfigured] = useState(false);
   const [dlState, setDlState] = useState<Record<string, DlStatus>>({});
@@ -119,13 +122,17 @@ export default function TrendingPage() {
     // keep the rest of the page while only the chart reloads for a new region
     setData((d) => (d ? { ...d, chart: [] } : d));
     setStatus((s) => (s === 'ready' ? s : 'loading'));
+    setChartLoading(true);
     getJson<Data>(`/api/trending?country=${encodeURIComponent(country)}`, { signal: ac.signal })
       .then((d) => {
         setData(d);
         setStatus('ready');
+        setChartLoading(false);
       })
       .catch((err) => {
-        if (!isAbortError(err)) setStatus('error');
+        if (isAbortError(err)) return;
+        setStatus('error');
+        setChartLoading(false);
       });
     return () => ac.abort();
   }, [country, attempt]);
@@ -212,8 +219,12 @@ export default function TrendingPage() {
                 {countryName} ▾
               </button>
             </div>
-            {data.chart.length === 0 ? (
+            {chartLoading && data.chart.length === 0 ? (
               <RowListSkeleton count={6} />
+            ) : data.chart.length === 0 ? (
+              <div role="status" className="rounded bg-elevated px-3 py-2 text-sm text-subdued">
+                The {countryName} chart is unavailable right now; try another region or check back later.
+              </div>
             ) : (
               <div className="grid grid-cols-1 gap-1 lg:grid-cols-2">
                 {data.chart.map((t) => {

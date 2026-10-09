@@ -17,6 +17,7 @@ interface FormState {
 export default function RadiosPage() {
   const [stations, setStations] = useState<RadioStation[] | null>(null);
   const [status, setStatus] = useState<LoadStatus>('loading');
+  const [attempt, setAttempt] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
   const [formError, setFormError] = useState('');
@@ -48,7 +49,7 @@ export default function RadiosPage() {
       .then((d) => setIsAdmin(Boolean(d.current?.isAdmin)))
       .catch(() => {});
     return () => ac.abort();
-  }, [load]);
+  }, [load, attempt]);
 
   const play = (s: RadioStation) => {
     if (current?.id === -s.id) toggle();
@@ -135,7 +136,8 @@ export default function RadiosPage() {
         </>
       )}
 
-      {status === 'error' && <LoadErrorState what="your stations" onRetry={() => load()} />}
+      {/* retry re-runs the effect so the page drops back to the skeleton while it refetches */}
+      {status === 'error' && <LoadErrorState what="your stations" onRetry={() => setAttempt((n) => n + 1)} />}
 
       {status === 'loading' && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" aria-hidden>

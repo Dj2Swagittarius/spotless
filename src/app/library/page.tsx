@@ -30,6 +30,7 @@ export default function LibraryPage() {
   const [scanning, setScanning] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [mine, setMine] = useState(false);
   const [myArtistIds, setMyArtistIds] = useState<Set<number>>(new Set());
   const [isAdmin, setIsAdmin] = useState(false);
@@ -93,14 +94,21 @@ export default function LibraryPage() {
   };
 
   const createPlaylist = async (name: string) => {
+    setCreateError(null);
     const res = await fetch('/api/playlists', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
-    });
-    const { id } = await res.json();
+    }).catch(() => null);
+    const d = res ? await res.json().catch(() => null) : null;
     setCreating(false);
-    router.push(`/playlist/${id}`);
+    // a 400 (bad name) or 401 answers JSON without an id; navigating to /playlist/undefined would 404
+    if (!res?.ok || typeof d?.id !== 'number') {
+      setCreateError(d?.error || 'Could not create the playlist; try again.');
+      return;
+    }
+    window.dispatchEvent(new Event('playlists-changed')); // sidebar refreshes its list
+    router.push(`/playlist/${d.id}`);
   };
 
   const tabClass = (t: Tab) =>
@@ -183,12 +191,23 @@ export default function LibraryPage() {
               </div>
             </Link>
           ))}
-          <button onClick={() => setCreating(true)} className="flex w-full items-center gap-4 rounded-lg bg-elevated p-3 text-left hover:bg-highlight">
+          <button
+            onClick={() => {
+              setCreateError(null);
+              setCreating(true);
+            }}
+            className="flex w-full items-center gap-4 rounded-lg bg-elevated p-3 text-left hover:bg-highlight"
+          >
             <div className="flex h-16 w-16 items-center justify-center rounded bg-highlight">
               <PlusIcon size={24} className="text-subdued" />
             </div>
             <div className="font-bold">Create playlist</div>
           </button>
+          {createError && (
+            <div role="alert" className="rounded bg-negative/10 px-3 py-2 text-sm text-negative">
+              {createError}
+            </div>
+          )}
           <button onClick={() => setImportOpen(true)} className="flex w-full items-center gap-4 rounded-lg bg-elevated p-3 text-left hover:bg-highlight">
             <div className="flex h-16 w-16 items-center justify-center rounded bg-highlight">
               <MusicIcon size={24} className="text-accent" />
