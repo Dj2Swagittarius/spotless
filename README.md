@@ -6,8 +6,9 @@ Point it at a folder of music and it gives you a dark-themed player with profile
 internet radio, an optional AI DJ, and Lidarr, Spotify and Last.fm integrations. Everything runs from one Docker
 image with an SQLite database; your audio files stay where they are and are only ever read.
 
-Acknowledgements: Spotless builds on the original Spotless project by lateshift.tech (see [LICENSE](LICENSE));
-thanks to its authors and contributors for the foundation this version grows from.
+Spotless is developed by lateshift.tech, with contributions from Gokulnath A R
+([@argokulnath](https://github.com/argokulnath)) and others (see [LICENSE](LICENSE)).
+If it's useful to you, you can [support development on Ko-fi](https://ko-fi.com/dj2swagittarius).
 
 ![Home](docs/home.png)
 
@@ -468,6 +469,12 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 Spotless is a personal project, built by a music fan rather than a professional developer, with a lot of help
 from AI tooling. It is used daily on a home server, but expect rough edges; issues and pull requests are welcome.
+
+## Support development
+
+Spotless is free and open source. If you'd like to help fund development, donations go to lateshift.tech
+through [Ko-fi](https://ko-fi.com/dj2swagittarius). They are appreciated but never expected, and they don't
+buy support or feature commitments.
 
 ## License
 
