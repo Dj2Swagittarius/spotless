@@ -21,7 +21,7 @@ Offline downloads are out of scope.
 | --- | --- | --- |
 | P1 | App shell, setup screen, WebView UI, native playback engine, notification / lock screen / Bluetooth / Wear, CI + signed APK on releases | — |
 | P2 | Android Auto browse tree + voice search ("play X on Spotless") | P1 playback service |
-| P3 | Home-screen now-playing widget | P1 playback service |
+| P3 | Home-screen now-playing widget | P1 playback service, P2 artwork cache |
 
 Each phase ships on its own. P1 is specified in full below; P2 and P3 at the level needed to keep P1's
 design open for them.
@@ -57,22 +57,28 @@ and pushes it to native.
 
 ### Web side changes
 
-`src/components/Player.tsx` (1228 lines) holds both the UI and the audio engine. Split the engine behind an
-interface:
+`src/components/Player.tsx` (1228 lines) holds both the UI and the audio engine. Every engine effect and
+handler already returns early when its `<audio>` element is missing, so the web side does not need a full
+engine extraction:
 
-- `PlaybackEngine` — the operations the Player needs (load queue, play, pause, seek, next, prev, jump,
-  volume, duck, EQ, quality, sleep timer, speak) plus a subscription for state.
-- `WebAudioEngine` — today's two-`<audio>`-element engine moved out of `Player.tsx` unchanged in behavior
-  (browser and desktop keep crossfade, EQ via Web Audio, adaptive quality, history posting).
-- `NativeEngine` — sends bridge commands and turns bridge events into store updates.
+- `src/lib/client/nativeBridge.ts` — finds `window.SpotlessNative`, runs the handshake, sends commands,
+  dispatches events. Pure module, testable in vitest's node environment with a fake port.
+- `src/lib/client/nativeSync.ts` — once the handshake succeeds: reconciles the store with native's queue,
+  then mirrors store changes to native commands and native events back into the store (with an echo guard).
+  Exposes a small zustand store `useNative` (`active`, `positionMs`, `durationMs`, `buffering`,
+  `sleepUntil`).
+- `Player.tsx` — when `useNative().active`: does not render the two `<audio>` elements (so the web engine
+  is inert), shows progress/duration/sleep from `useNative`, and routes `seek` and the sleep button to
+  native. Browser and desktop behavior is unchanged.
 
-The Player picks `NativeEngine` when the bridge handshake succeeds, otherwise `WebAudioEngine`. With
-`NativeEngine`:
+With native playback active:
 
 - history/scrobble posting is done by native (not JS),
 - the sleep timer is native,
-- DJ voice clips go through `speak` instead of `new Audio()` (`src/lib/client/djVoice.ts`),
-- the crossfade setting shows "Not available in the Android app yet".
+- DJ voice clips go through `speak` instead of `new Audio()` (`src/lib/client/djVoice.ts`), and JS does
+  not duck (native does),
+- the crossfade setting shows "Not available in the Android app yet",
+- Settings → Playback shows a "Change server" button that sends `changeServer`.
 
 ## Bridge protocol (P1)
 
@@ -106,8 +112,9 @@ the reverse) degrades to browser-style playback, never breaks.
 | `setEq` | `enabled, gains[10]` | same shape as `EqState` in `src/lib/eq.ts` |
 | `setQuality` | `"auto" \| "raw" \| "high" \| "normal" \| "saver"` | same ids as `src/lib/adaptive.ts` |
 | `setSleepTimer` | `minutes` or `0` to cancel | |
-| `speak` | `url` (server clip) or `text` (device TTS) | DJ voice; native ducks music while it plays |
+| `speak` | `id`, and either `audio` (base64 clip from `/api/dj/speak`) + `mime`, or `text` (device TTS) | DJ voice; native ducks music while it plays |
 | `stopSpeaking` | — | |
+| `changeServer` | — | handled by the activity: back to the setup screen |
 
 **Events (native → JS)**
 
@@ -117,19 +124,25 @@ the reverse) degrades to browser-style playback, never breaks.
 | `state` | `isPlaying, index, positionMs, durationMs, buffering, queueVersion, sleepUntil` | every change, plus every 1 s while playing and the page is visible |
 | `queue` | `tracks, index, queueVersion` | reply to `getState`, and whenever native changed the queue itself (e.g. resumed session) |
 | `trackError` | `trackId, reason` | a track failed after retries and was skipped |
-| `queueEnd` | — | last item finished with repeat off — JS may refill (radio) and `syncQueue` |
-| `speaking` | `active: boolean` | DJ clip started / finished |
+| `speaking` | `id, active: boolean` | DJ clip started / finished |
 | `authLost` | — | a native request got 401 |
 
-`queueVersion` increments on every queue change on either side; a `syncQueue` carrying a stale version is
-ignored, so a late message from JS cannot undo a skip made on the lock screen.
+`queueVersion` increments only when native changes the queue's contents on its own (session restored after
+a restart; in P2, a queue started from Android Auto). `setQueue` / `syncQueue` carry `baseVersion`, the last
+version JS saw; a `syncQueue` with a stale `baseVersion` is rejected and answered with a `queue` event, so JS
+re-reads native's queue instead of overwriting it. Index changes (skips from the lock screen or a headset)
+do not bump the version; `syncQueue` keeps whatever item is playing now and locates it in the new list.
+
+Radio-mode refill needs no event of its own: the Player already tops the queue up when the last queued
+track starts, and that `appendTracks` reaches native as a `syncQueue`.
 
 **Track payload** is the existing `Track` type from `src/lib/types.ts`, unchanged. Native builds URLs itself:
 
 - stream: `{origin}/api/stream/{id}{streamQuery(rung, offset)}` — same rules as `streamQuery` in
   `src/lib/adaptive.ts` (`format=mp3&maxBitRate=N[&offset=S]` for transcoded rungs, nothing for raw)
 - art: `{origin}/api/artwork/{albumId}`
-- stations (`streamUrl` set, negative id): play `streamUrl` directly; ICY metadata updates the title
+- stations (`streamUrl` set, negative id): play `streamUrl` — the server hands out `/api/stations/{id}/stream`,
+  resolved against the origin and fetched with the session cookie
 
 Tracks with `missing: true` (playlist placeholders) are skipped by native.
 
@@ -140,8 +153,9 @@ Tracks with `missing: true` (playlist placeholders) are skipped by native.
 | Gapless | ExoPlayer playlist |
 | ReplayGain | per-item volume on media item transition: `min(1, volume × duck × min(1.4, 10^(gain/20)))` — same formula as `Player.tsx` |
 | 10-band EQ | Media3 `AudioProcessor` with the `eq.ts` chain: lowshelf 31 Hz, peaking at 62 Hz–8 kHz with Q 1.1, highshelf 16 kHz; gains clamped to ±12 dB; disabled = exact bypass. Coefficients use the Web Audio biquad formulas (Audio EQ Cookbook) so the curve matches the browser. Not `android.media.audiofx.Equalizer` (band layout differs per device) |
-| Quality | Port of the `adaptive.ts` ladder: raw / high 320 / normal 192 / saver 128. Auto: unmetered network → raw, metered → normal, unknown → high; each stall steps one rung down, a rung is handed back after 90 s without a stall. A downshift rebuilds the current item at the new rung with `offset` = current position |
-| Preload | On Auto over metered data, the next item is not buffered until 45 s before the current one ends (matches `deferPreload`) |
+| Quality | Port of the `adaptive.ts` ladder: raw / high 320 / normal 192 / saver 128, same `networkRung` rules: Data Saver on → saver; unknown network → high; unmetered → raw, metered → high; downlink estimate < 1 Mbps → saver, < 2 → at most normal, < 5 → at most high. Each stall steps one rung down (at most to saver), a rung is handed back per 90 s without a stall. A downshift rebuilds the current item at the new rung with `offset` = current position. Network facts come from `ConnectivityManager` (`NET_CAPABILITY_NOT_METERED`, `linkDownstreamBandwidthKbps`, `restrictBackgroundStatus`) |
+| Transcoded items | A transcoded stream is a non-seekable pipe; seeking one rebuilds the item at the target offset. A `ForwardingPlayer` adds the item's offset to positions and reports the tagged duration, so lock-screen scrubbing behaves like the web player |
+| Preload | ExoPlayer's default buffer (about 50 s ahead) only reaches into the next item near the end of the current one, which matches the web's 45 s `deferPreload` lead; no extra logic |
 | Recovery | ExoPlayer load-error retry; at most 4 restreams per track, then skip and emit `trackError` |
 | Start stall | Nothing audible within 12 s of start → restream once at a lower rung, then skip |
 | History / scrobble | `start` event when a library track begins; `played` (with `startedAt` unix seconds) once half the track or 240 s has actually been heard, counting only real listening (gaps > 2 s don't count). Stations and placeholders are never reported. Same rules as `Player.tsx` |
@@ -160,7 +174,8 @@ Android media-resume card pick up where playback stopped.
 
 ## Shell (P1)
 
-**Setup.** On first launch (or "Change server" in the app menu) a Compose screen asks for the server address.
+**Setup.** On first launch (or "Change server": the button in Settings → Playback, the launcher icon's
+long-press shortcut, or the can't-reach-server screen) a Compose screen asks for the server address.
 Normalization matches `normalizeServer` in `desktop/main.js`: trim; add `http://` if there is no scheme; only
 http/https; keep the origin only. Then `GET {origin}/api/health` with an 8 s timeout; a JSON body with
 `ok: true` means a working Spotless server, `ok: false` means "Spotless is there but not healthy", non-JSON
@@ -173,8 +188,12 @@ servers rarely have TLS.
 history, health, P2 browse) use an OkHttp `CookieJar` that reads `CookieManager.getInstance().getCookie(origin)`
 — this includes the HttpOnly `spotless_session` cookie. Native requests send no `Origin` header, which the
 server's CSRF check accepts (`src/proxy.ts`). A 401 on any native request → pause, emit `authLost`, the
-WebView reloads into the sign-in page. A 401 while the WebView is not alive shows a notification "Sign in to
-Spotless again" that opens the app.
+WebView reloads into the sign-in page. If the WebView is not alive, playback just stays paused; opening the
+app lands on the sign-in page.
+
+**Who may control playback.** The media session accepts the Spotless custom commands (`spotless.cmd`) only
+from controllers in the app's own package. Other apps (and the system UI) get the standard media commands
+only.
 
 **Navigation.**
 
@@ -198,7 +217,11 @@ notification permission. No other permissions.
 - Server unreachable at launch → native screen "Can't reach {server}" with Retry and Change server. Audio
   already buffered keeps playing.
 - Page load fails mid-session → same screen over the WebView, Retry reloads.
-- Playback errors → see Recovery above; the web shows a toast for `trackError`.
+- Playback errors → see Recovery above; the failed track is skipped like in the browser player (the web
+  re-dispatches `trackError` as a `spotless-track-error` window event; there is no toast system to show it in).
+
+**Media buttons after a restart.** The manifest declares Media3's `MediaButtonReceiver`, so a headset or car
+"play" press after the process died starts the service and goes through playback resumption.
 
 ## P2 — Android Auto and voice search (outline)
 
@@ -214,6 +237,9 @@ notification permission. No other permissions.
   third-party media apps varies by phone; best effort.
 - Sideloaded apps only appear in Android Auto with Auto's developer setting "Unknown sources" turned on. Normal
   visibility needs Play Store distribution.
+- Artwork: Android Auto cannot send the session cookie, so browse items carry `content://` artwork URIs served
+  by an `ArtworkProvider` that fetches `/api/artwork/{albumId}` with the cookie and caches the file
+  (`ArtworkCache`). Read access is granted to the Android Auto package per URI; the provider is not exported.
 
 ## P3 — Home-screen widget (outline)
 
@@ -249,11 +275,13 @@ build is skipped.
 
 **Web (vitest).**
 
-- `NativeEngine` against a fake bridge: each store action sends the right command; `state` / `queue`
-  events update the store; stale `queueVersion` is ignored.
-- Handshake: no bridge or unsupported version → `WebAudioEngine`.
+- `nativeBridge` against a fake port: handshake accepts bridge version 1, rejects others, times out to
+  "no native"; events reach subscribers; bad JSON is ignored.
+- `nativeSync` against a fake bridge and the real store: each store action sends the right command;
+  `state` / `queue` events update the store without echoing back; startup reconciliation (native queue wins
+  when non-empty, otherwise the restored queue is pushed with `play: false`).
 - `djVoice.ts` routes to `speak` when native is active.
-- Existing tests stay green after `WebAudioEngine` is extracted.
+- Existing tests stay green.
 
 **Android (JUnit on the JVM).** Pure logic only:
 
