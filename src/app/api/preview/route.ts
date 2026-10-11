@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { deezerRequest } from '@/lib/deezer';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,20 +10,15 @@ export async function GET(req: NextRequest) {
   const title = req.nextUrl.searchParams.get('title')?.trim() ?? '';
   if (!artist || !title) return NextResponse.json({ error: 'artist and title required' }, { status: 400 });
 
-  try {
-    const q = encodeURIComponent(`artist:"${artist}" track:"${title}"`);
-    let res = await fetch(`https://api.deezer.com/search/track?q=${q}&limit=1`, { signal: AbortSignal.timeout(8000) });
-    let data = res.ok ? await res.json() : null;
-    if (!data?.data?.length) {
-      // loose fallback
-      const loose = encodeURIComponent(`${artist} ${title}`);
-      res = await fetch(`https://api.deezer.com/search/track?q=${loose}&limit=1`, { signal: AbortSignal.timeout(8000) });
-      data = res.ok ? await res.json() : null;
-    }
-    const url = data?.data?.[0]?.preview || null;
-    return NextResponse.json({ previewUrl: url });
-  } catch {
-    // timeout (AbortSignal.timeout above) or network failure: an upstream problem, not "no preview"
-    return NextResponse.json({ error: 'preview lookup failed' }, { status: 502 });
+  type Hits = { data?: { preview?: string | null }[] };
+  const q = encodeURIComponent(`artist:"${artist}" track:"${title}"`);
+  let res = await deezerRequest<Hits>(`/search/track?q=${q}&limit=1`, 8000);
+  if (res.ok && !res.data?.data?.length) {
+    // loose fallback
+    const loose = encodeURIComponent(`${artist} ${title}`);
+    res = await deezerRequest<Hits>(`/search/track?q=${loose}&limit=1`, 8000);
   }
+  // timeout, network failure or Deezer error: an upstream problem, not "no preview"
+  if (!res.ok) return NextResponse.json({ error: 'preview lookup failed' }, { status: 502 });
+  return NextResponse.json({ previewUrl: res.data?.data?.[0]?.preview || null });
 }

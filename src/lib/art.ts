@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getDb, artDir } from './db';
+import { deezer } from './deezer';
 
 type ArtRun = {
   at: string;
@@ -130,15 +131,6 @@ async function downloadImage(url: string): Promise<Buffer | null> {
   return buf;
 }
 
-async function dz<T>(p: string): Promise<T | null> {
-  const res = await request(`https://api.deezer.com${p}`, 10_000);
-  if (!res?.ok) return null;
-  try {
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
-}
 
 function folderArt(trackPath: string): Buffer | null {
   try {
@@ -198,7 +190,7 @@ type DeezerArtist = {
 
 async function findAlbumImage(artist: string, album: string): Promise<Buffer | null> {
   const q = `artist:"${searchValue(artist)}" album:"${searchValue(album)}"`;
-  const result = await dz<{ data?: DeezerAlbum[] }>(
+  const result = await deezer<{ data?: DeezerAlbum[] }>(
     `/search/album?q=${encodeURIComponent(q)}&limit=10`
   );
 
@@ -213,7 +205,7 @@ async function findAlbumImage(artist: string, album: string): Promise<Buffer | n
 }
 
 async function findArtistImage(artist: string): Promise<Buffer | null> {
-  const result = await dz<{ data?: DeezerArtist[] }>(
+  const result = await deezer<{ data?: DeezerArtist[] }>(
     `/search/artist?q=${encodeURIComponent(searchValue(artist))}&limit=10`
   );
   const wanted = normalize(artist);

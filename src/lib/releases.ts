@@ -1,5 +1,6 @@
 import { getDb, getSetting, setSetting } from './db';
 import { foldText } from './scanner';
+import { deezerRequest } from './deezer';
 
 export interface NewRelease {
   artist: string;
@@ -25,24 +26,10 @@ interface DeezerStats {
 }
 
 async function deezer<T>(path: string, stats: DeezerStats): Promise<T | null> {
-  try {
-    const res = await fetch(`https://api.deezer.com${path}`, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) {
-      stats.failed++;
-      return null;
-    }
-    const json = (await res.json()) as T | { error?: unknown } | null;
-    // Deezer reports quota and lookup failures as HTTP 200 with an { error: {...} } envelope.
-    if (!json || typeof json !== 'object' || ('error' in json && json.error)) {
-      stats.failed++;
-      return null;
-    }
-    stats.ok++;
-    return json as T;
-  } catch {
-    stats.failed++;
-    return null;
-  }
+  const { data, ok } = await deezerRequest<T>(path);
+  if (ok) stats.ok++;
+  else stats.failed++;
+  return data;
 }
 
 interface CachedBuild {
