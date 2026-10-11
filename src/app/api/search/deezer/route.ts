@@ -1,17 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { deezerRequest, deezerUnavailableMessage } from '@/lib/deezer';
 
 export const dynamic = 'force-dynamic';
-
-async function dz<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(`https://api.deezer.com${path}`, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
-}
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
@@ -38,15 +29,20 @@ export async function GET(req: NextRequest) {
   );
 
   const enc = encodeURIComponent(q);
-  const [artists, albums, tracks] = await Promise.all([
-    dz<{ data: { name: string; picture_medium: string | null; nb_fan: number; link: string }[] }>(`/search/artist?q=${enc}&limit=6`),
-    dz<{ data: { title: string; cover_medium: string | null; link: string; artist: { name: string } }[] }>(`/search/album?q=${enc}&limit=8`),
-    dz<{ data: { title: string; preview: string | null; link: string; artist: { name: string }; album: { title: string; cover_medium: string | null } }[] }>(
-      `/search/track?q=${enc}&limit=10`
+  const [artistsRes, albumsRes, tracksRes] = await Promise.all([
+    deezerRequest<{ data: { name: string; picture_medium: string | null; nb_fan: number; link: string }[] }>(`/search/artist?q=${enc}&limit=6`, 8000),
+    deezerRequest<{ data: { title: string; cover_medium: string | null; link: string; artist: { name: string } }[] }>(`/search/album?q=${enc}&limit=8`, 8000),
+    deezerRequest<{ data: { title: string; preview: string | null; link: string; artist: { name: string }; album: { title: string; cover_medium: string | null } }[] }>(
+      `/search/track?q=${enc}&limit=10`,
+      8000
     ),
   ]);
+  const [artists, albums, tracks] = [artistsRes.data, albumsRes.data, tracksRes.data];
+  // every lookup failed: say so, rather than looking like Deezer has nothing for the query
+  const error = !artistsRes.ok && !albumsRes.ok && !tracksRes.ok ? deezerUnavailableMessage() : undefined;
 
   return NextResponse.json({
+    ...(error ? { error } : {}),
     artists: (artists?.data ?? [])
       .filter((a) => !libArtists.has(norm(a.name)))
       .map((a) => ({ name: a.name, image: a.picture_medium, fans: a.nb_fan, deezerUrl: a.link })),

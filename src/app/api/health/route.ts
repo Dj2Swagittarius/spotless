@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { deezerStatus } from '@/lib/deezer';
 import { scanStatus } from '@/lib/scanner';
 import { APP_COMMIT, APP_VERSION } from '@/lib/version';
 
@@ -24,7 +25,15 @@ export async function GET() {
 
   const scan = scanStatus();
   return NextResponse.json(
-    { ok: true, scanning: scan.scanning, lastScanAt: scan.lastScan?.at ?? null, version: APP_VERSION, commit: APP_COMMIT },
+    {
+      ok: true,
+      scanning: scan.scanning,
+      lastScanAt: scan.lastScan?.at ?? null,
+      version: APP_VERSION,
+      commit: APP_COMMIT,
+      // In-memory outcome of the last Deezer request (Discover, charts, search); no network call here.
+      deezer: deezerStatus(),
+    },
     { headers: NO_STORE }
   );
 }
