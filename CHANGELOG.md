@@ -5,6 +5,13 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- Library: new **New downloads** tab listing albums the scanner found new songs for in the last 30 days, grouped into
+  Today / This week / Earlier this month. An old album that gains a track shows "1 new song". Tracks now record when a
+  scan first saw them (`tracks.added_at`), so a moved or retagged file is not "new" again, and a release whose files
+  keep an old modification time still shows up on the day it lands. Existing libraries backfill from file mtime, and
+  a first-ever import uses mtimes too so the whole library is not "new" at once. Home's "Recently added" uses the same
+  timestamp.
+
 ## [0.3.1] - 2026-10-09
 
 - Desktop app for Windows, macOS and Linux (`desktop/`, Electron). A native window around your Spotless server, for

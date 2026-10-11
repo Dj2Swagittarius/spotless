@@ -543,9 +543,13 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
     }[])
       albumsByKey.set(`${al.artist_id}|${albumKey(al.name)}`, { id: al.id, has_art: al.has_art });
     const setArt = db.prepare('UPDATE albums SET has_art = 1 WHERE id = ?');
+    // added_at is set on insert only: a retag keeps it, and a relinked move keeps the old row's.
+    // The very first import stamps file mtimes so the whole library isn't "new" at once.
+    const scanStartedAt = Math.floor(Date.now() / 1000);
+    const firstImport = existing.length === 0;
     const upTrack = db.prepare(`
-      INSERT INTO tracks (title, album_id, artist_id, duration, track_no, disc_no, genre, path, mtime, gain)
-      VALUES (@title, @albumId, @artistId, @duration, @trackNo, @discNo, @genre, @path, @mtime, @gain)
+      INSERT INTO tracks (title, album_id, artist_id, duration, track_no, disc_no, genre, path, mtime, gain, added_at)
+      VALUES (@title, @albumId, @artistId, @duration, @trackNo, @discNo, @genre, @path, @mtime, @gain, @addedAt)
       ON CONFLICT(path) DO UPDATE SET
         title = excluded.title, album_id = excluded.album_id, artist_id = excluded.artist_id,
         duration = excluded.duration, track_no = excluded.track_no, disc_no = excluded.disc_no,
@@ -563,6 +567,7 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
       path: string;
       mtime: number;
       gain: number | null;
+      addedAt: number;
     };
     let batch: TrackUpsert[] = [];
     const flushBatch = db.transaction((rows: TrackUpsert[]) => {
@@ -629,6 +634,7 @@ export async function scanLibrary(options: { automatic?: boolean } = {}): Promis
           path: file,
           mtime,
           gain: c.replaygain_track_gain?.dB ?? null,
+          addedAt: firstImport ? Math.floor(mtime / 1000) : scanStartedAt,
         });
         changed++;
         if (known === undefined) inserted.push(file);

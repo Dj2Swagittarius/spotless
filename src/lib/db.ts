@@ -99,6 +99,12 @@ function initSchema(db: Database.Database): void {
   `);
   migrateMultiUser(db);
   if (!hasColumn(db, 'tracks', 'gain')) db.exec('ALTER TABLE tracks ADD COLUMN gain REAL');
+  // unix seconds the scanner first saw the song (drives "New downloads"); rows that
+  // predate the column fall back to their file mtime, the best guess available
+  if (!hasColumn(db, 'tracks', 'added_at')) {
+    db.exec('ALTER TABLE tracks ADD COLUMN added_at INTEGER');
+    db.exec('UPDATE tracks SET added_at = mtime / 1000 WHERE added_at IS NULL');
+  }
   // per-profile credential for Subsonic mobile clients (generated on demand)
   if (!hasColumn(db, 'users', 'app_password')) db.exec('ALTER TABLE users ADD COLUMN app_password TEXT');
   // web authentication: hashes only, never plaintext web passwords
@@ -175,6 +181,7 @@ function ensureIndexes(d: Database.Database): void {
     { name: 'idx_history_user_played', table: 'history', columns: ['user_id', 'played_at'], expr: 'user_id, played_at' },
     { name: 'idx_history_track', table: 'history', columns: ['track_id'], expr: 'track_id' },
     { name: 'idx_tracks_genre', table: 'tracks', columns: ['genre'], expr: 'genre' },
+    { name: 'idx_tracks_added', table: 'tracks', columns: ['added_at'], expr: 'added_at' },
     { name: 'idx_tracks_title_nocase', table: 'tracks', columns: ['title'], expr: 'title COLLATE NOCASE' },
     { name: 'idx_likes_track', table: 'likes', columns: ['track_id'], expr: 'track_id' },
     { name: 'idx_playlist_tracks_track', table: 'playlist_tracks', columns: ['track_id'], expr: 'track_id' },

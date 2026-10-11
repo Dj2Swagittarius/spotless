@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { getDb } from './db';
 import { userIdFrom } from './user';
-import type { Track, Album, Artist, Playlist, HomeSection } from './types';
+import type { Track, Album, Artist, Playlist, HomeSection, NewDownload } from './types';
 
 /** Column list every track-returning endpoint shares, so clients always see the same shape (incl. gain). */
 export const TRACK_SELECT = `
@@ -54,6 +54,29 @@ export function getAlbums(): Album[] {
        GROUP BY al.id ORDER BY ar.name, al.year, al.name`
     )
     .all() as Album[];
+}
+
+const NEW_DOWNLOADS_DAYS = 30; // the Library tab's empty state quotes this number
+const NEW_DOWNLOADS_LIMIT = 100;
+
+/**
+ * Albums that gained songs in the last NEW_DOWNLOADS_DAYS, newest first. `addedAt` is
+ * when the scanner last found a new song on the album (unix seconds) and `newTracks`
+ * how many arrived inside the window, so a single new track on an old album reads as such.
+ */
+export function getNewDownloads(now = Math.floor(Date.now() / 1000)): NewDownload[] {
+  const since = now - NEW_DOWNLOADS_DAYS * 86400;
+  return getDb()
+    .prepare(
+      `SELECT al.id, al.name, al.year, ar.name AS artist, ar.id AS artistId,
+              COUNT(t.id) AS trackCount, COALESCE(SUM(t.duration), 0) AS duration,
+              MAX(t.added_at) AS addedAt, SUM(t.added_at >= @since) AS newTracks
+       FROM albums al JOIN artists ar ON ar.id = al.artist_id
+       JOIN tracks t ON t.album_id = al.id
+       GROUP BY al.id HAVING MAX(t.added_at) >= @since
+       ORDER BY addedAt DESC, al.id DESC LIMIT @limit`
+    )
+    .all({ since, limit: NEW_DOWNLOADS_LIMIT }) as NewDownload[];
 }
 
 export function getAlbum(id: number): (Album & { tracks: Track[] }) | null {
@@ -371,7 +394,7 @@ export function getHome(userId: number): HomeSection[] {
               COUNT(t.id) AS trackCount, COALESCE(SUM(t.duration), 0) AS duration
        FROM albums al JOIN artists ar ON ar.id = al.artist_id
        LEFT JOIN tracks t ON t.album_id = al.id
-       GROUP BY al.id ORDER BY MAX(t.mtime) DESC LIMIT 12`
+       GROUP BY al.id ORDER BY MAX(t.added_at) DESC, al.id DESC LIMIT 12`
     )
     .all() as Album[];
   if (newAlbums.length > 0) sections.push({ title: 'Recently added', kind: 'albums', albums: newAlbums });
