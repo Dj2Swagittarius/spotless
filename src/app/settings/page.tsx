@@ -1079,6 +1079,27 @@ export default function SettingsPage() {
             Source on GitHub
           </a>
         </div>
+        <div className="mt-4 text-sm text-subdued">
+          Spotless is free and open source. If you&apos;d like to help fund development, you can donate through{' '}
+          <a
+            href="https://github.com/sponsors/Dj2Swagittarius"
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-white"
+          >
+            GitHub Sponsors
+          </a>{' '}
+          or{' '}
+          <a
+            href="https://ko-fi.com/dj2swagittarius"
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-white"
+          >
+            Ko-fi
+          </a>
+          .
+        </div>
       </Section>
     </div>
   );
