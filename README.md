@@ -472,8 +472,8 @@ from AI tooling. It is used daily on a home server, but expect rough edges; issu
 
 ## Support development
 
-Spotless is free and open source. If you'd like to help fund development, donations go to lateshift.tech
-through [Ko-fi](https://ko-fi.com/dj2swagittarius). They are appreciated but never expected, and they don't
+Spotless is free and open source. If you'd like to help fund development, you can donate through
+[Ko-fi](https://ko-fi.com/dj2swagittarius). Donations are appreciated but never expected, and they don't
 buy support or feature commitments.
 
 ## License
