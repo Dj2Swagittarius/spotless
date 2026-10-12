@@ -19,6 +19,10 @@ class UrlPolicyTest {
         assertEquals(EXTERNAL, UrlPolicy.decide(origin, "https://spotify.com.evil.example/"))
         assertEquals(EXTERNAL, UrlPolicy.decide(origin, "https://notlast.fm/"))
     }
+    @Test fun `cleartext sign-in pages leave`() {
+        assertEquals(EXTERNAL, UrlPolicy.decide(origin, "http://accounts.spotify.com/authorize"))
+        assertEquals(EXTERNAL, UrlPolicy.decide(origin, "http://last.fm/api/auth"))
+    }
     @Test fun `other sites leave`() = assertEquals(EXTERNAL, UrlPolicy.decide(origin, "https://github.com/"))
     @Test fun `non-http leaves`() = assertEquals(EXTERNAL, UrlPolicy.decide(origin, "mailto:a@b.c"))
 }

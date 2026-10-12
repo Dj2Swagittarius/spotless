@@ -16,7 +16,8 @@ object UrlPolicy {
     fun decide(origin: String, url: String): Decision {
         val parsed = url.toHttpUrlOrNull() ?: return Decision.EXTERNAL
         if (ServerAddress.origin(parsed) == origin) return Decision.IN_APP
-        if (SIGN_IN_HOSTS.any { it.matches(parsed.host) }) return Decision.IN_APP
+        // https only, like desktop/main.js: a cleartext provider page must not sit next to the session and the bridge
+        if (parsed.isHttps && SIGN_IN_HOSTS.any { it.matches(parsed.host) }) return Decision.IN_APP
         return Decision.EXTERNAL
     }
 }
