@@ -1,6 +1,8 @@
 package app.spotless.android.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,7 +34,11 @@ import androidx.compose.ui.unit.dp
 fun SetupScreen(initial: String?, error: String?, checking: Boolean, onConnect: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf(initial.orEmpty()) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Column(
+            // scrolls so the field stays usable in landscape with the keyboard up
+            Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
             Text("Connect to your Spotless server", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text(
@@ -64,7 +70,11 @@ fun SetupScreen(initial: String?, error: String?, checking: Boolean, onConnect: 
 @Composable
 fun UnreachableScreen(origin: String, message: String, onRetry: () -> Unit, onChangeServer: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Column(
+            // scrolls so the field stays usable in landscape with the keyboard up
+            Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
             Text("Can't reach $origin", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text(message, style = MaterialTheme.typography.bodyMedium)
