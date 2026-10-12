@@ -86,6 +86,23 @@ describe('nativeSync', () => {
     expect(useNative.getState().positionMs).toBe(5000);
   });
 
+  it('keeps the pre-shuffle order while native holds the same tracks, else replaces it', () => {
+    const { bridge, emit } = fakeBridge();
+    usePlayer.setState({ queue: [t(3), t(1), t(2)], originalQueue: [t(1), t(2), t(3)], index: 0 });
+    stop = startNativeSync(bridge);
+    emit({ type: 'queue', tracks: [t(3), t(1), t(2)], index: 0, queueVersion: 1, positionMs: 0, isPlaying: false });
+    expect(usePlayer.getState().originalQueue.map((x) => x.id)).toEqual([1, 2, 3]);
+    expect(usePlayer.getState().queue.map((x) => x.id)).toEqual([3, 1, 2]);
+
+    // a queue with different tracks (same length) is a new queue: its own order becomes the original
+    emit({ type: 'queue', tracks: [t(7), t(1), t(2)], index: 0, queueVersion: 2, positionMs: 0, isPlaying: false });
+    expect(usePlayer.getState().originalQueue.map((x) => x.id)).toEqual([7, 1, 2]);
+
+    // a different length replaces it too
+    emit({ type: 'queue', tracks: [t(7), t(1)], index: 0, queueVersion: 3, positionMs: 0, isPlaying: false });
+    expect(usePlayer.getState().originalQueue.map((x) => x.id)).toEqual([7, 1]);
+  });
+
   it('pushes the restored queue, paused, when native is empty', () => {
     const { bridge, sent, emit } = fakeBridge();
     usePlayer.setState({ queue: [t(9)], index: 0, repeat: 'all', volume: 0.5 });

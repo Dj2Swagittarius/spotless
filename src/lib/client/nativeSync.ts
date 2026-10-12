@@ -37,6 +37,16 @@ export const nativeBridge = () => current;
 
 type PlayerSnapshot = ReturnType<typeof usePlayer.getState>;
 
+const sortedIds = (tracks: Track[]) => tracks.map((t) => t.id).sort((a, b) => a - b);
+
+/** Same tracks, ignoring order (a shuffled copy of the same queue). */
+function sameTracks(a: Track[], b: Track[]): boolean {
+  if (a.length !== b.length) return false;
+  const x = sortedIds(a);
+  const y = sortedIds(b);
+  return x.every((id, i) => id === y[i]);
+}
+
 export function startNativeSync(bridge: NativeBridge): () => void {
   current = bridge;
   let applying = false; // store writes made on native's behalf must not be sent back
@@ -83,7 +93,14 @@ export function startNativeSync(bridge: NativeBridge): () => void {
           }
           sendSettings();
         }
-        apply({ queue: e.tracks, originalQueue: e.tracks.slice(), index: e.index, isPlaying: e.isPlaying });
+        // native sends the queue in play order; the page's pre-shuffle order survives while it holds the same tracks
+        const original = usePlayer.getState().originalQueue;
+        apply({
+          queue: e.tracks,
+          originalQueue: sameTracks(original, e.tracks) ? original : e.tracks.slice(),
+          index: e.index,
+          isPlaying: e.isPlaying,
+        });
         return;
       }
       case 'state': {
