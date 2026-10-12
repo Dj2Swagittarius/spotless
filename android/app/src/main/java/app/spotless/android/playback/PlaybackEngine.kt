@@ -547,6 +547,9 @@ class PlaybackEngine(
 
     private fun isPlayingNow(): Boolean {
         val state = exo.playbackState
+        // A phone call (transient audio-focus loss) keeps playWhenReady but suppresses playback: the page must
+        // show "paused" until ExoPlayer resumes by itself, which arrives as onIsPlayingChanged(true).
+        if (exo.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE) return false
         return exo.playWhenReady && (state == Player.STATE_READY || state == Player.STATE_BUFFERING)
     }
 
