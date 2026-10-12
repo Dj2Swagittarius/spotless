@@ -70,8 +70,11 @@ class PlaybackEngine(
     /** Media id of an early-ended transcode we are returning to; the hop to the next track and back is not a new play. */
     private var pendingReturn: String? = null
 
-    /** Failed or unplayable tracks in a row since playback last actually started. */
+    /** Tracks that failed to play in a row since playback last actually started. */
     private var consecutiveFailures = 0
+
+    /** Missing-track placeholders skipped in a row since playback last actually started. */
+    private var skippedPlaceholders = 0
     private var volume = 1.0
     private var duck = 1.0
     private var speechDuck = 1.0
@@ -173,6 +176,7 @@ class PlaybackEngine(
         currentId = null
         pendingReturn = null
         consecutiveFailures = 0
+        skippedPlaceholders = 0
         if (queue.index < 0) {
             exo.clearMediaItems()
         } else {
@@ -256,6 +260,8 @@ class PlaybackEngine(
         val id = currentId ?: return false
         val info = items[id] ?: return false
         if (info.track.streamUrl != null) return false
+        val index = slotOf(id, exo.currentMediaItemIndex)
+        if (index < 0) return false
         if (countRetry) {
             if (!canRestream(info)) return false
             info.restreams++
@@ -264,7 +270,6 @@ class PlaybackEngine(
         lastSwitchAt = now()
         playedThisStream = false
         tracker.onJump()
-        val index = exo.currentMediaItemIndex
         val wasPlaying = exo.playWhenReady
         exo.replaceMediaItem(index, buildItem(info.track, rung, atSec, reuseId = id))
         exo.seekTo(index, if (rung.bitrate == 0) (atSec * 1000).toLong() else 0L)
@@ -275,6 +280,12 @@ class PlaybackEngine(
         if (wasPlaying) handler.postDelayed(startStall, START_STALL_MS)
         if (rungChanged) refreshNext()
         return true
+    }
+
+    /** Where the item with this media id sits in the playlist: `hint` if it still holds it, else a search, else -1. */
+    private fun slotOf(id: String, hint: Int): Int {
+        if (hint in 0 until exo.mediaItemCount && exo.getMediaItemAt(hint).mediaId == id) return hint
+        return (0 until exo.mediaItemCount).firstOrNull { exo.getMediaItemAt(it).mediaId == id } ?: -1
     }
 
     /** Whether a counted reload is allowed right now: past the switch cooldown and under the per-track cap. */
@@ -386,8 +397,8 @@ class PlaybackEngine(
         val info = id?.let(items::get)
         if (info == null) { emitState(); return }
         if (!info.track.isPlayable) {
-            // a placeholder counts as a failure so a queue of them cannot skip forever
-            if (++consecutiveFailures >= failureLimit()) exo.pause()
+            // skip missing tracks, but stop after a full lap with nothing playable so repeat-all cannot spin
+            if (++skippedPlaceholders >= exo.mediaItemCount) { skippedPlaceholders = 0; exo.pause() }
             else handler.post { if (exo.hasNextMediaItem()) exo.seekToNextMediaItem() else exo.pause() }
             emitState()
             return
@@ -410,6 +421,7 @@ class PlaybackEngine(
         if (isPlaying) {
             playedThisStream = true
             consecutiveFailures = 0
+            skippedPlaceholders = 0
             handler.removeCallbacks(startStall)
             tracker.onPlaying()?.let(::report)
             handler.postDelayed(tick, 1000)
@@ -466,8 +478,13 @@ class PlaybackEngine(
         pendingReturn = id
         handler.post {
             if (currentId != id) return@post // overtaken by another change
-            exo.seekTo(oldPosition.mediaItemIndex, 0)
+            val index = slotOf(id, oldPosition.mediaItemIndex) // a queue sync may have moved it
             pendingReturn = null
+            if (index < 0) { // the track is gone: carry on with the one that followed it
+                onMediaItemTransition(exo.currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+                return@post
+            }
+            exo.seekTo(index, 0)
             restreamCurrent(retryRung(info), endedAt, countRetry = true)
         }
     }
