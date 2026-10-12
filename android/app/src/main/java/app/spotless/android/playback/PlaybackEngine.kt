@@ -479,12 +479,14 @@ class PlaybackEngine(
         handler.post {
             if (currentId != id) return@post // overtaken by another change
             val index = slotOf(id, oldPosition.mediaItemIndex) // a queue sync may have moved it
-            pendingReturn = null
             if (index < 0) { // the track is gone: carry on with the one that followed it
+                pendingReturn = null
                 onMediaItemTransition(exo.currentMediaItem, Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
                 return@post
             }
+            // seek while pendingReturn is still set: the SEEK transition back must read as "same play"
             exo.seekTo(index, 0)
+            pendingReturn = null
             restreamCurrent(retryRung(info), endedAt, countRetry = true)
         }
     }
