@@ -1,6 +1,7 @@
 package app.spotless.android.playback
 
 import android.os.Bundle
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
@@ -20,7 +21,14 @@ class SessionCallback(private val engine: PlaybackEngine, private val ownPackage
     private val command = SessionCommand(BridgeJson.CMD, Bundle.EMPTY)
 
     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
-        if (controller.packageName != ownPackage) return super.onConnect(session, controller)
+        if (controller.packageName != ownPackage) {
+            // other apps get transport controls only: changing the playlist behind the engine's back would
+            // desync its queue mirror and stream arbitrary URIs through the signed-in client
+            val transport = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .removeAll(Player.COMMAND_SET_MEDIA_ITEM, Player.COMMAND_CHANGE_MEDIA_ITEMS)
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailablePlayerCommands(transport).build()
+        }
         ownControllers += controller
         val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().add(command).build()
         return MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(commands).build()
