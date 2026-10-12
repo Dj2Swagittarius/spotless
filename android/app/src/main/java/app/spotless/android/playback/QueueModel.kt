@@ -85,4 +85,9 @@ data class SessionSnapshot(
     val positionMs: Long,
     val repeat: String,
     val version: Int,
+    // settings the page sends on every connect; kept so a headset resume after process death plays with them
+    val volume: Double = 1.0,
+    val eqEnabled: Boolean = false,
+    val eqGains: List<Double> = List(10) { 0.0 },
+    val quality: String = "raw",
 )

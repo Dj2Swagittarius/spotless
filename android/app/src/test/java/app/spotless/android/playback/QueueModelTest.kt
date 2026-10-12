@@ -3,6 +3,7 @@ package app.spotless.android.playback
 import app.spotless.android.bridge.TrackDto
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import app.spotless.android.bridge.BridgeJson
 
 class QueueModelTest {
     private fun t(id: Int) = TrackDto(id = id, title = "t$id")
@@ -65,5 +66,21 @@ class QueueModelTest {
         val (short, i2) = QueueModel.trimForPersist(tracks.take(10), 3)
         assertEquals(10, short.size)
         assertEquals(3, i2)
+    }
+
+    @Test fun `a snapshot saved before the settings existed decodes with defaults`() {
+        val old = """{"tracks":[{"id":4,"title":"t4"}],"index":0,"positionMs":1500,"repeat":"off","version":2}"""
+        val snap = BridgeJson.json.decodeFromString(SessionSnapshot.serializer(), old)
+        assertEquals(1.0, snap.volume, 0.0)
+        assertEquals(false, snap.eqEnabled)
+        assertEquals(List(10) { 0.0 }, snap.eqGains)
+        assertEquals("raw", snap.quality)
+        assertEquals(1500L, snap.positionMs)
+    }
+
+    @Test fun `snapshot settings survive a round trip`() {
+        val snap = SessionSnapshot(listOf(t(1)), 0, 0, "off", 0, volume = 0.4, eqEnabled = true, eqGains = List(10) { it.toDouble() }, quality = "auto")
+        val back = BridgeJson.json.decodeFromString(SessionSnapshot.serializer(), BridgeJson.json.encodeToString(SessionSnapshot.serializer(), snap))
+        assertEquals(snap, back)
     }
 }

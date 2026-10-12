@@ -76,6 +76,8 @@ class PlaybackEngine(
     /** Missing-track placeholders skipped in a row since playback last actually started. */
     private var skippedPlaceholders = 0
     private var volume = 1.0
+    private var eqEnabled = false
+    private var eqGains = List(10) { 0.0 }
     private var duck = 1.0
     private var speechDuck = 1.0
     private var lastSwitchAt = 0L
@@ -151,10 +153,10 @@ class PlaybackEngine(
             BridgeCommand.Prev -> { if (exo.hasPreviousMediaItem()) exo.seekToPreviousMediaItem() else seekCurrent(0); play() }
             is BridgeCommand.JumpTo -> if (cmd.index in 0 until exo.mediaItemCount) { exo.seekTo(cmd.index, 0); play() }
             is BridgeCommand.SetRepeat -> { exo.repeatMode = repeatOf(cmd.mode); persistSoon() }
-            is BridgeCommand.SetVolume -> { volume = cmd.value.coerceIn(0.0, 1.0); applyVolume() }
+            is BridgeCommand.SetVolume -> { volume = cmd.value.coerceIn(0.0, 1.0); applyVolume(); persistSoon() }
             is BridgeCommand.SetDuck -> { duck = cmd.value.coerceIn(0.0, 1.0); applyVolume() }
-            is BridgeCommand.SetEq -> eq.update(cmd.enabled, cmd.gains.toDoubleArray())
-            is BridgeCommand.SetQuality -> { quality.setting = cmd.value; refreshNext() }
+            is BridgeCommand.SetEq -> { eqEnabled = cmd.enabled; eqGains = cmd.gains; eq.update(cmd.enabled, cmd.gains.toDoubleArray()); persistSoon() }
+            is BridgeCommand.SetQuality -> { quality.setting = cmd.value; refreshNext(); persistSoon() }
             is BridgeCommand.SetSleepTimer -> setSleep(cmd.minutes)
             is BridgeCommand.Speak -> voice.speak(cmd)
             BridgeCommand.StopSpeaking -> voice.stop()
@@ -585,6 +587,10 @@ class PlaybackEngine(
             positionMs = if (index >= 0) player.currentPosition.coerceAtLeast(0) else 0,
             repeat = repeatName(),
             version = queue.version,
+            volume = volume,
+            eqEnabled = eqEnabled,
+            eqGains = eqGains,
+            quality = quality.setting,
         )
         graph.appScope.launch {
             try {
@@ -601,6 +607,12 @@ class PlaybackEngine(
         val snap = sessions.load() ?: return
         if (snap.tracks.isEmpty() || snap.index < 0 || exo.mediaItemCount > 0) return
         val index = snap.index.coerceIn(0, snap.tracks.lastIndex)
+        volume = snap.volume.coerceIn(0.0, 1.0)
+        applyVolume()
+        eqEnabled = snap.eqEnabled
+        eqGains = snap.eqGains
+        eq.update(snap.eqEnabled, snap.eqGains.toDoubleArray())
+        quality.setting = snap.quality
         queue.replaceFromNative(snap.tracks, index)
         exo.repeatMode = repeatOf(snap.repeat)
         val rung = quality.current()
