@@ -6,6 +6,7 @@ import DjSettings from '@/components/DjSettings';
 import ThemePicker from '@/components/ThemePicker';
 import { XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
+import { nativeBridge, useNative } from '@/lib/client/nativeSync';
 import { loadEq, saveEq, EQ_PRESETS, EQ_FREQS, EQ_MIN, EQ_MAX, type EqState } from '@/lib/eq';
 import {
   RUNGS,
@@ -142,6 +143,7 @@ export default function SettingsPage() {
 
   // playback
   const [crossfade, setCrossfade] = useState(0);
+  const nativeActive = useNative((s) => s.active);
   const [quality, setQuality] = useState<QualityId>('raw');
   const [auto, setAuto] = useState<{ rung: Rung; net: NetworkInfo } | null>(null);
   const [eq, setEq] = useState<EqState | null>(null);
@@ -759,11 +761,29 @@ export default function SettingsPage() {
           step={1}
           value={crossfade}
           onChange={(e) => saveCrossfade(Number(e.target.value))}
+          disabled={nativeActive}
           className="w-full max-w-xs"
         />
         <p className="mt-1 text-sm text-subdued">
           0 = tracks start instantly back-to-back. Higher = songs blend into each other. Applies to this device.
         </p>
+        {nativeActive && (
+          <p className="mt-1 text-sm text-subdued">Not available in the Android app yet — songs play gapless.</p>
+        )}
+        {nativeActive && (
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium">Android app</div>
+              <p className="text-sm text-subdued">Connect this app to a different Spotless server.</p>
+            </div>
+            <button
+              onClick={() => nativeBridge()?.send({ type: 'changeServer' })}
+              className="rounded-full border border-highlight px-4 py-1.5 text-sm font-bold hover:border-white"
+            >
+              Change server
+            </button>
+          </div>
+        )}
         <div className="mt-4 flex items-center justify-between gap-4">
           <div>
             <div className="text-sm font-medium">Radio mode</div>

@@ -7,6 +7,7 @@ import { usePlayer } from '@/store/player';
 import { useLikes } from '@/store/likes';
 import { fmtDuration } from '@/lib/format';
 import { attachEq, resumeEq } from '@/lib/eq';
+import { connectNative, nativeBridge, useNative } from '@/lib/client/nativeSync';
 import {
   RUNGS,
   currentRung,
@@ -141,12 +142,18 @@ export default function Player() {
   const likedIds = useLikes((s) => s.ids);
   const toggleLike = useLikes((s) => s.toggle);
   const likes = { ids: likedIds, toggle: toggleLike };
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [webProgress, setProgress] = useState(0);
+  const [webDuration, setDuration] = useState(0);
+  // In the Android app the native player is the engine: position, duration and the sleep timer come from it,
+  // and the <audio> elements below are not rendered (every engine handler already no-ops without them).
+  const nativeState = useNative();
+  const progress = nativeState.active ? nativeState.positionMs / 1000 : webProgress;
+  const duration = nativeState.active ? nativeState.durationMs / 1000 : webDuration;
   const [showQueue, setShowQueue] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [expanded, setExpanded] = useState(false); // mobile: mini vs full player
-  const [sleepUntil, setSleepUntil] = useState<number | null>(null);
+  const [webSleepUntil, setSleepUntil] = useState<number | null>(null);
+  const sleepUntil = nativeState.active ? nativeState.sleepUntil : webSleepUntil;
   const pathname = usePathname();
   const SLEEP_STEPS = [15, 30, 60, 90]; // minutes
   const dragFrom = useRef<number | null>(null);
@@ -174,6 +181,8 @@ export default function Player() {
   // Until this has run, the store drops its writes so they can't clobber the saved queue.
   useEffect(() => {
     usePlayer.persist?.rehydrate()?.catch(() => {});
+    // inside the Android app, hand playback to the native player once the session is restored
+    return connectNative();
   }, []);
 
   const clearResumeSeek = () => {
@@ -679,31 +688,39 @@ export default function Player() {
     if (playing && track) markStarted(track);
   };
 
-  // sleep timer: pause when it fires
+  // sleep timer (browser): pause when it fires — the Android app runs its own
   useEffect(() => {
-    if (!sleepUntil) return;
+    if (!webSleepUntil) return;
     const t = setInterval(() => {
-      if (Date.now() >= sleepUntil) {
+      if (Date.now() >= webSleepUntil) {
         setPlaying(false);
         setSleepUntil(null);
       }
     }, 5000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sleepUntil]);
+  }, [webSleepUntil]);
 
   const cycleSleep = () => {
-    if (!sleepUntil) {
-      setSleepUntil(Date.now() + SLEEP_STEPS[0] * 60000);
-      return;
+    let minutes: number | null = SLEEP_STEPS[0];
+    if (sleepUntil) {
+      const remainMin = Math.ceil((sleepUntil - Date.now()) / 60000);
+      minutes = SLEEP_STEPS.find((m) => m > remainMin) ?? null;
     }
-    const remainMin = Math.ceil((sleepUntil - Date.now()) / 60000);
-    const next = SLEEP_STEPS.find((m) => m > remainMin);
-    setSleepUntil(next ? Date.now() + next * 60000 : null);
+    const bridge = nativeBridge();
+    if (nativeState.active && bridge) bridge.send({ type: 'setSleepTimer', minutes: minutes ?? 0 });
+    else setSleepUntil(minutes ? Date.now() + minutes * 60000 : null);
   };
   const sleepLabel = sleepUntil ? `${Math.max(1, Math.ceil((sleepUntil - Date.now()) / 60000))}m` : null;
 
   const seek = (v: number) => {
+    const bridge = nativeBridge();
+    if (nativeState.active && bridge) {
+      const positionMs = Math.round(v * 1000);
+      bridge.send({ type: 'seek', positionMs });
+      useNative.setState({ positionMs });
+      return;
+    }
     const a = els()[active];
     if (!a) return;
     cancelFade();
@@ -812,8 +829,12 @@ export default function Player() {
 
   return (
     <>
-      <audio ref={audioARef} {...audioProps} />
-      <audio ref={audioBRef} {...audioProps} />
+      {!nativeState.active && (
+        <>
+          <audio ref={audioARef} {...audioProps} />
+          <audio ref={audioBRef} {...audioProps} />
+        </>
+      )}
 
       {showLyrics && track && (
         <div className="fixed inset-x-0 bottom-0 top-14 z-80 overflow-y-auto bg-black/95 pb-64 md:bottom-20 md:left-64 md:top-0 md:z-30 md:pb-0">
