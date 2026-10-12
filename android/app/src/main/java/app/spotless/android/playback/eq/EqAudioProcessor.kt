@@ -54,6 +54,10 @@ class EqAudioProcessor : BaseAudioProcessor() {
         out.flip()
     }
 
+    override fun onFlush() {
+        bank?.reset()
+    }
+
     override fun onReset() {
         bank = null
         applied = null
