@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.spotless.android.bridge.BridgeJson
 import kotlinx.coroutines.flow.first
+import java.io.IOException
 
 private val Context.sessionData by preferencesDataStore("session")
 
@@ -19,7 +20,12 @@ class SessionStore(private val context: Context) {
     }
 
     suspend fun load(): SessionSnapshot? {
-        val text = context.sessionData.data.first()[key] ?: return null
+        val prefs = try {
+            context.sessionData.data.first()
+        } catch (_: IOException) {
+            return null
+        }
+        val text = prefs[key] ?: return null
         return runCatching { BridgeJson.json.decodeFromString(SessionSnapshot.serializer(), text) }.getOrNull()
     }
 
