@@ -638,7 +638,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `LibraryTree`, `MediaIds`, `BrowseNode`, `HttpLibrarySource` (Tasks 1–2); `ArtworkProvider` (Task 3); `QueueModel.replaceFromNative`, engine internals (P1).
-- Produces: `PlaybackEngine.queueFromLibrary(tracks: List<TrackDto>, index: Int): List<MediaItem>`; `class SessionCallback(engine, ownPackage, tree, context) : MediaLibrarySession.Callback`.
+- Produces: `PlaybackEngine.queueFromLibrary(tracks: List<TrackDto>, index: Int): List<MediaItem>`; `class SessionCallback(engine, tree, context) : MediaLibrarySession.Callback`.
+
+> **Updated after P1 shipped:** P1's `SessionCallback` identifies the app's own controllers by `controller.uid == Process.myUid()` (Media3 takes `packageName` from the connecting app unverified), takes no `ownPackage` parameter, and gives other apps transport commands only (no `COMMAND_SET_MEDIA_ITEM` / `COMMAND_CHANGE_MEDIA_ITEMS`). Keep the UID gate. For P2, other controllers (Android Auto, assistants) need the library commands and `COMMAND_SET_MEDIA_ITEM` so they can play a browse id or a search; that is safe because `onSetMediaItems` below resolves only `play:` ids and search queries and rejects anything else for non-own controllers (do not fall through to `super.onSetMediaItems` for them — that would let another app queue arbitrary URIs). Still withhold `COMMAND_CHANGE_MEDIA_ITEMS` from them. Adapt the code below accordingly: replace `controller.packageName != ownPackage` / `== ownPackage` with the UID check, and in `onSetMediaItems` return a failed future for non-own controllers whose items are neither a `play:` id nor a search.
 
 - [ ] **Step 1: Add `queueFromLibrary` to `PlaybackEngine`**
 
