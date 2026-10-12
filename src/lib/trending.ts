@@ -1,4 +1,8 @@
 import { getDb, getSetting, setSetting } from './db';
+import { deezer, deezerStatus } from './deezer';
+import { createLogger } from './log';
+
+const log = createLogger('trending');
 
 export interface TrendTrack {
   rank: number;
@@ -35,12 +39,17 @@ function cached<T>(key: string): { data: T; failed: boolean } | null {
 const store = (key: string, data: unknown, failed = false) =>
   setSetting(key, JSON.stringify({ at: Date.now(), data, ...(failed ? { failed: true } : {}) }));
 
+/** Apple's chart feed; Deezer goes through lib/deezer for its rate limit and error reporting. */
 async function getJson<T>(url: string): Promise<T | null> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      log.warn(`chart fetch failed: HTTP ${res.status} (${url})`);
+      return null;
+    }
     return (await res.json()) as T;
-  } catch {
+  } catch (err) {
+    log.warn(`chart fetch failed: ${err instanceof Error ? err.message : String(err)} (${url})`);
     return null;
   }
 }
@@ -77,8 +86,8 @@ export async function countryChart(code: string): Promise<TrendTrack[]> {
 
   let out: TrendTrack[] = [];
   if (cc === 'ww') {
-    const d = await getJson<{ data: { title: string; artist: { name: string }; album: { title: string; cover_big: string | null } }[] }>(
-      'https://api.deezer.com/chart/0/tracks?limit=50'
+    const d = await deezer<{ data: { title: string; artist: { name: string }; album: { title: string; cover_big: string | null } }[] }>(
+      '/chart/0/tracks?limit=50'
     );
     out = (d?.data ?? []).map((t, i) => ({
       rank: i + 1,
@@ -112,7 +121,7 @@ interface DeezerGenre {
 async function deezerGenres(): Promise<{ list: DeezerGenre[]; failed: boolean }> {
   const hit = cached<DeezerGenre[]>('trending:genrelist');
   if (hit) return { list: hit.data, failed: hit.failed };
-  const d = await getJson<{ data: DeezerGenre[] }>('https://api.deezer.com/genre');
+  const d = await deezer<{ data: DeezerGenre[] }>('/genre');
   const list = (d?.data ?? []).filter((g) => g.name !== 'All');
   const failed = list.length === 0;
   store('trending:genrelist', list, failed);
@@ -123,8 +132,8 @@ async function genreChart(g: DeezerGenre): Promise<{ tracks: TrendTrack[]; faile
   const key = `trending:genre:${g.id}`;
   const hit = cached<TrendTrack[]>(key);
   if (hit) return { tracks: hit.data, failed: hit.failed };
-  const d = await getJson<{ tracks: { data: { title: string; artist: { name: string }; album: { title: string; cover_medium: string | null } }[] } }>(
-    `https://api.deezer.com/editorial/${g.id}/charts`
+  const d = await deezer<{ tracks: { data: { title: string; artist: { name: string }; album: { title: string; cover_medium: string | null } }[] } }>(
+    `/editorial/${g.id}/charts`
   );
   const tracks = (d?.tracks?.data ?? []).slice(0, 20).map((t, i) => ({
     rank: i + 1,
@@ -221,6 +230,9 @@ export async function genreTrending(userId: number): Promise<GenreTrending> {
     }
   }
   const result: GenreTrending = { forYou: forYou.map((t, i) => ({ ...t, rank: i + 1 })), rows };
-  if (chartFailed) result.error = 'Some genre charts are unavailable right now; showing what could be loaded.';
+  if (chartFailed) {
+    const reason = deezerStatus().lastError;
+    result.error = `Some genre charts are unavailable right now${reason ? ` (Deezer: ${reason})` : ''}; showing what could be loaded.`;
+  }
   return result;
 }

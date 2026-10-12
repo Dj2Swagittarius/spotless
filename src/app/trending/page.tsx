@@ -184,7 +184,7 @@ export default function TrendingPage() {
         <>
           {data.error && (
             <div role="status" className="rounded-sm bg-elevated px-3 py-2 text-sm text-subdued">
-              Some charts could not be loaded; this view may be incomplete.
+              {data.error}
             </div>
           )}
 

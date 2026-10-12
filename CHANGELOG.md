@@ -11,6 +11,13 @@ All notable changes to Spotless are listed here. The format follows
   keep an old modification time still shows up on the day it lands. Existing libraries backfill from file mtime, and
   a first-ever import uses mtimes too so the whole library is not "new" at once. Home's "Recently added" uses the same
   timestamp.
+- Discover, Trending and "Not in your library" search no longer fail silently when Deezer does. All Deezer calls now
+  share one client (`src/lib/deezer.ts`) that keeps the whole server under Deezer's 50-requests-per-5-seconds quota
+  (Discover, New Releases, Collection gaps, charts and the artwork backfill used to burst independently and could
+  trip it), retries once on a quota or busy answer, and treats Deezer's HTTP 200 `{ error }` replies as failures
+  instead of empty results. The reason (for example `network error (ENOTFOUND)` or `Deezer error 4: Quota limit
+  exceeded`) is logged, shown on the Discover, Trending and Search pages, and reported under `deezer` in
+  `/api/health`.
 
 ## [0.3.1] - 2026-10-09
 

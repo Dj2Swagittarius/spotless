@@ -1,4 +1,5 @@
 import { getDb } from '../db';
+import { deezerRequest } from '../deezer';
 import { nextPosition } from '../playlistMatch';
 import type { Track } from '../types';
 import { getDjConfig } from './config';
@@ -152,18 +153,15 @@ const sameish = (a: string, b: string) => {
 /** Look a song up on Deezer. `found: false` means Deezer answered and has no such song by that artist. */
 async function deezerLookup(s: WantedSong): Promise<{ suggestion: Suggestion; found: boolean | null }> {
   const base: Suggestion = { title: s.title, artist: s.artist, reason: s.reason ?? null, cover: null, previewUrl: null, deezerUrl: null };
-  try {
-    // Deezer's artist:"" track:"" filters return nothing now, so search plainly and check the hits ourselves
-    const q = encodeURIComponent(`${s.artist} ${s.title}`);
-    const res = await fetch(`https://api.deezer.com/search/track?q=${q}&limit=10`, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return { suggestion: base, found: null };
-    const d = (await res.json()) as { data?: { title: string; preview: string | null; link: string; artist: { name: string }; album: { cover_medium: string | null } }[] };
-    const hit = d.data?.find((h) => sameish(h.artist.name, s.artist) && sameish(h.title, s.title));
-    if (!hit) return { suggestion: base, found: false };
-    return { suggestion: { ...base, cover: hit.album.cover_medium, previewUrl: hit.preview || null, deezerUrl: hit.link }, found: true };
-  } catch {
-    return { suggestion: base, found: null }; // Deezer unreachable: can't verify either way
-  }
+  // Deezer's artist:"" track:"" filters return nothing now, so search plainly and check the hits ourselves
+  const q = encodeURIComponent(`${s.artist} ${s.title}`);
+  const { data: d, ok } = await deezerRequest<{
+    data?: { title: string; preview: string | null; link: string; artist: { name: string }; album: { cover_medium: string | null } }[];
+  }>(`/search/track?q=${q}&limit=10`, 8000);
+  if (!ok) return { suggestion: base, found: null }; // Deezer unreachable: can't verify either way
+  const hit = d?.data?.find((h) => sameish(h.artist.name, s.artist) && sameish(h.title, s.title));
+  if (!hit) return { suggestion: base, found: false };
+  return { suggestion: { ...base, cover: hit.album.cover_medium, previewUrl: hit.preview || null, deezerUrl: hit.link }, found: true };
 }
 
 /** Save a confirmed proposal: library tracks first, then placeholders for the songs it lacks. */

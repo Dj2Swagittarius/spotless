@@ -1,4 +1,5 @@
 import { getDb, getSetting, setSetting } from './db';
+import { deezer, deezerRequest, deezerUnavailableMessage } from './deezer';
 import { getTaste } from './spotify';
 
 export interface DiscoverTrack {
@@ -28,16 +29,6 @@ interface DeezerArtist {
   link: string;
   picture_medium: string | null;
   nb_fan: number;
-}
-
-async function deezer<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(`https://api.deezer.com${path}`, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
 }
 
 /** Top artists by play count (last 90 days), topped up with Spotify top artists, falling back to library size. */
@@ -104,15 +95,24 @@ export function dislikeArtist(userId: number, name: string): void {
   }
 }
 
-async function relatedFor(seedName: string): Promise<DeezerArtist[]> {
-  const search = await deezer<{ data: DeezerArtist[] }>(`/search/artist?q=${encodeURIComponent(seedName)}&limit=1`);
-  const match = search?.data?.[0];
-  if (!match) return [];
-  const related = await deezer<{ data: DeezerArtist[] }>(`/artist/${match.id}/related?limit=15`);
-  return related?.data ?? [];
+/** `failed` is set when Deezer could not answer, as opposed to knowing no related artists. */
+async function relatedFor(seedName: string): Promise<{ related: DeezerArtist[]; failed: boolean }> {
+  const search = await deezerRequest<{ data: DeezerArtist[] }>(`/search/artist?q=${encodeURIComponent(seedName)}&limit=1`);
+  const match = search.data?.data?.[0];
+  if (!match) return { related: [], failed: !search.ok };
+  const related = await deezerRequest<{ data: DeezerArtist[] }>(`/artist/${match.id}/related?limit=15`);
+  return { related: related.data?.data ?? [], failed: !related.ok };
 }
 
-export async function buildDiscover(userId: number, force = false): Promise<{ generatedAt: string; seeds: string[]; artists: DiscoverArtist[] }> {
+export interface DiscoverResult {
+  generatedAt: string;
+  seeds: string[];
+  artists: DiscoverArtist[];
+  /** Set when Deezer failed and there is nothing to show, so the page can say why. */
+  error?: string;
+}
+
+export async function buildDiscover(userId: number, force = false): Promise<DiscoverResult> {
   if (!force) {
     const raw = getSetting(cacheKey(userId));
     if (raw) {
@@ -128,7 +128,7 @@ export async function buildDiscover(userId: number, force = false): Promise<{ ge
   const seeds = seedArtists(userId);
   const known = knownArtistNames(userId);
 
-  const relatedLists = await Promise.all(seeds.map(async (seed) => ({ seed, related: await relatedFor(seed) })));
+  const relatedLists = await Promise.all(seeds.map(async (seed) => ({ seed, ...(await relatedFor(seed)) })));
 
   // score suggestions by how many of the user's artists they relate to
   const scored = new Map<string, { artist: DeezerArtist; because: string[] }>();
@@ -166,7 +166,8 @@ export async function buildDiscover(userId: number, force = false): Promise<{ ge
     })
   );
 
-  const result = { generatedAt: new Date().toISOString(), seeds, artists };
+  const result: DiscoverResult = { generatedAt: new Date().toISOString(), seeds, artists };
   if (artists.length > 0) setSetting(cacheKey(userId), JSON.stringify(result));
+  else if (relatedLists.some((l) => l.failed)) result.error = deezerUnavailableMessage();
   return result;
 }
