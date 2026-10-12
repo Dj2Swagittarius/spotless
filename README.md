@@ -213,7 +213,7 @@ the current system, written to `desktop/dist/`).
 
 ## Android app
 
-Each [release](https://github.com/Dj2Swagittarius/spotless/releases) includes `Spotless-<version>.apk`. Install it
+Releases built with signing configured include `Spotless-<version>.apk` on the [releases page](https://github.com/Dj2Swagittarius/spotless/releases). Install it
 on your phone (Android 8 or newer; allow installs from your browser or file manager when asked), enter your
 server's address — the same one you use in a browser — and sign in.
 

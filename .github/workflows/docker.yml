@@ -147,8 +147,6 @@ jobs:
           esac
           echo >> notes.md
           echo "**Desktop app:** download the installer for your system below and point it at your server." >> notes.md
-          echo >> notes.md
-          echo "**Android app:** install Spotless-${VERSION}.apk below on your phone (allow installs from your browser or file manager when asked) and point it at your server." >> notes.md
           cat notes.md
 
       - uses: actions/download-artifact@v8
@@ -168,6 +166,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # mention the APK only when this release actually has one (it needs the signing secrets)
+          if ls desktop-dist/Spotless-*.apk >/dev/null 2>&1; then
+            echo >> notes.md
+            echo "**Android app:** install the Spotless .apk below on your phone (allow installs from your browser or file manager when asked) and point it at your server." >> notes.md
+          fi
           EXTRA=""
           case "$GITHUB_REF_NAME" in *-*) EXTRA="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "Spotless $GITHUB_REF_NAME" --notes-file notes.md $EXTRA desktop-dist/*
