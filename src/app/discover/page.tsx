@@ -27,6 +27,7 @@ interface DiscoverData {
   generatedAt: string;
   seeds: string[];
   artists: DiscoverArtist[];
+  error?: string;
 }
 
 interface NewRelease {
@@ -472,8 +473,14 @@ export default function DiscoverPage() {
 
       {!loading && data && data.artists.length === 0 && (
         <div className="rounded-lg bg-elevated p-6 text-subdued">
-          No suggestions yet. Play some music so there&apos;s listening history to work from — or check that the
-          server has internet access.
+          {data.error ? (
+            <>{data.error} Suggestions will load once it answers again.</>
+          ) : (
+            <>
+              No suggestions yet. Play some music so there&apos;s listening history to work from — or check that the
+              server has internet access.
+            </>
+          )}
         </div>
       )}
 

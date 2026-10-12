@@ -42,6 +42,8 @@ interface DzResults {
   artists: DzArtist[];
   albums: DzAlbum[];
   tracks: DzTrack[];
+  /** Set when Deezer could not be reached, so an empty block is not mistaken for "no matches". */
+  error?: string;
 }
 
 interface DlButtonProps {
@@ -248,6 +250,12 @@ function Search() {
           )}
           {!hasLib && <div className="text-subdued">Nothing in your library for “{q}”.</div>}
         </>
+      )}
+
+      {dz?.error && status !== 'error' && (
+        <div className="mt-6 rounded-lg bg-elevated p-4 text-sm text-subdued">
+          Results beyond your library are unavailable: {dz.error}
+        </div>
       )}
 
       {hasDz && status !== 'error' && (
