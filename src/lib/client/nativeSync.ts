@@ -41,7 +41,8 @@ export function startNativeSync(bridge: NativeBridge): () => void {
   current = bridge;
   let applying = false; // store writes made on native's behalf must not be sent back
   let ready = false; // native's queue has been read and reconciled
-  let version = 0; // last queueVersion native reported
+  let version = 0; // queueVersion of the last queue native sent us (only `queue` events move it)
+  let requested = false; // a getState is out to fetch a queue newer than ours
 
   const apply = (patch: Partial<PlayerSnapshot>) => {
     applying = true;
@@ -69,6 +70,7 @@ export function startNativeSync(bridge: NativeBridge): () => void {
     switch (e.type) {
       case 'queue': {
         version = e.queueVersion;
+        requested = false;
         useNative.setState({ positionMs: e.positionMs });
         if (!ready) {
           ready = true;
@@ -85,16 +87,23 @@ export function startNativeSync(bridge: NativeBridge): () => void {
         return;
       }
       case 'state': {
-        version = e.queueVersion;
         useNative.setState({
           positionMs: e.positionMs,
           durationMs: e.durationMs,
           buffering: e.buffering,
           sleepUntil: e.sleepUntil ?? null,
         });
+        if (!ready) return;
+        if (e.queueVersion !== version) {
+          // native replaced its queue; this state's index belongs to a queue we haven't read yet
+          if (!requested) {
+            requested = true;
+            bridge.send({ type: 'getState' });
+          }
+          return;
+        }
         const s = usePlayer.getState();
-        if (ready && (s.index !== e.index || s.isPlaying !== e.isPlaying))
-          apply({ index: e.index, isPlaying: e.isPlaying });
+        if (s.index !== e.index || s.isPlaying !== e.isPlaying) apply({ index: e.index, isPlaying: e.isPlaying });
         return;
       }
       case 'trackError':
@@ -111,8 +120,8 @@ export function startNativeSync(bridge: NativeBridge): () => void {
     if (s.queue !== prev.queue) {
       const was = prev.queue[prev.index];
       const now = s.queue[s.index];
-      if (was && now && was.id === now.id && s.isPlaying === prev.isPlaying) {
-        // same song keeps playing: only what is around it changed
+      if (was && now && was.id === now.id) {
+        // same song stays current: only what is around it (or its play state, sent below) changed
         bridge.send({ type: 'syncQueue', tracks: s.queue, index: s.index, baseVersion: version });
       } else {
         pushQueue(s.queue, s.index, s.isPlaying);
@@ -161,18 +170,20 @@ export function connectNative(): () => void {
   if (!port) return () => {};
   let cancelled = false;
   let stop: (() => void) | null = null;
-  connect(port).then(async (bridge) => {
-    if (!bridge || cancelled) return;
-    if (!usePlayer.persist.hasHydrated()) {
-      await new Promise<void>((resolve) => {
-        const unsub = usePlayer.persist.onFinishHydration(() => {
-          unsub();
-          resolve();
+  void connect(port)
+    .then(async (bridge) => {
+      if (!bridge || cancelled) return;
+      if (!usePlayer.persist.hasHydrated()) {
+        await new Promise<void>((resolve) => {
+          const unsub = usePlayer.persist.onFinishHydration(() => {
+            unsub();
+            resolve();
+          });
         });
-      });
-    }
-    if (!cancelled) stop = startNativeSync(bridge);
-  });
+      }
+      if (!cancelled) stop = startNativeSync(bridge);
+    })
+    .catch(() => {}); // no native sync is better than an unhandled rejection
   return () => {
     cancelled = true;
     stop?.();

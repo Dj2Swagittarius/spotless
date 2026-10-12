@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { NativeBridge, NativeCommand, NativeEvent } from '@/lib/client/nativeBridge';
-import { nativeBridge, startNativeSync, useNative } from '@/lib/client/nativeSync';
+import { connectNative, nativeBridge, startNativeSync, useNative } from '@/lib/client/nativeSync';
 import { usePlayer } from '@/store/player';
 import type { Track } from '@/lib/types';
 
@@ -148,7 +148,7 @@ describe('nativeSync', () => {
     expect(useNative.getState()).toMatchObject({ positionMs: 1000, durationMs: 200000, sleepUntil: 123 });
   });
 
-  it('re-reads the queue native sends after a rejected sync', () => {
+  it('takes the queue native sends and carries its version into the next sync', () => {
     const { bridge, sent, emit } = fakeBridge();
     stop = startNativeSync(bridge);
     emit(emptyQueue);
@@ -159,11 +159,62 @@ describe('nativeSync', () => {
     expect(sent.at(-1)).toMatchObject({ type: 'syncQueue', baseVersion: 1 });
   });
 
+  it('does not trust a state from a newer queue version; it asks for the queue once', () => {
+    const { bridge, sent, emit } = fakeBridge();
+    stop = startNativeSync(bridge);
+    emit(emptyQueue);
+    usePlayer.getState().playQueue([t(1), t(2)], 0);
+    sent.length = 0;
+    const newer = (index: number, queueVersion = 1): NativeEvent => ({
+      type: 'state',
+      isPlaying: true,
+      index,
+      positionMs: 2000,
+      durationMs: 200000,
+      buffering: false,
+      queueVersion,
+    });
+    emit(newer(1));
+    emit(newer(1));
+    expect(usePlayer.getState().index).toBe(0);
+    expect(sent).toEqual([{ type: 'getState' }]);
+    expect(useNative.getState().positionMs).toBe(2000);
+    emit({ type: 'queue', tracks: [t(7), t(8)], index: 1, queueVersion: 1, positionMs: 2000, isPlaying: true });
+    expect(usePlayer.getState().queue.map((x) => x.id)).toEqual([7, 8]);
+    expect(usePlayer.getState().index).toBe(1);
+    sent.length = 0;
+    usePlayer.getState().appendTracks([t(9)]);
+    expect(sent.at(-1)).toMatchObject({ type: 'syncQueue', baseVersion: 1 });
+    // a later mismatch can ask again
+    emit(newer(0, 2));
+    expect(sent.at(-1)).toEqual({ type: 'getState' });
+  });
+
+  it('resumes the same song in place when playQueue re-plays it from paused', () => {
+    const { bridge, sent, emit } = fakeBridge();
+    stop = startNativeSync(bridge);
+    emit({ type: 'queue', tracks: [t(1), t(2)], index: 0, queueVersion: 0, positionMs: 4000, isPlaying: false });
+    sent.length = 0;
+    usePlayer.getState().playQueue([t(1), t(2), t(3)], 0);
+    expect(sent.some((c) => c.type === 'setQueue')).toBe(false);
+    expect(sent).toEqual([
+      { type: 'syncQueue', tracks: [t(1), t(2), t(3)], index: 0, baseVersion: 0 },
+      { type: 'play' },
+    ]);
+  });
+
   it('stops cleanly', () => {
     const { bridge } = fakeBridge();
     stop = startNativeSync(bridge);
     stop();
     expect(useNative.getState().active).toBe(false);
     expect(nativeBridge()).toBeNull();
+  });
+
+  it('connectNative does nothing without an injected port', () => {
+    const stopFn = connectNative();
+    expect(typeof stopFn).toBe('function');
+    expect(() => stopFn()).not.toThrow();
+    expect(useNative.getState().active).toBe(false);
   });
 });
