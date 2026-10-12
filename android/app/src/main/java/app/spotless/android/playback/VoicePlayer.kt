@@ -122,7 +122,8 @@ class VoicePlayer(
                     tts?.shutdown()
                     tts = null
                     ttsReady = false
-                    finish()
+                    // only the speak this engine was started for; a later clip speak must keep playing
+                    if (queued != null && queued.first == currentId) finish()
                 }
             }
         }.apply {
