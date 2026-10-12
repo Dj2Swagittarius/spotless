@@ -101,11 +101,23 @@ jobs:
       contents: read
     uses: ./.github/workflows/desktop.yml
 
+  # Android APK for a release; only built for v* tags. Pull requests that touch android/ build it
+  # through android.yml directly.
+  android:
+    needs: ci
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+
   # A vX.Y.Z tag (created by `npm run release`) becomes a GitHub Release once its image is
   # published, with that version's CHANGELOG section as the notes and the desktop installers attached.
   release:
-    needs: [build, desktop]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # android stays in needs so its APK artifact is awaited, but a failed Android build must not block the
+    # server's release (the APK download below is continue-on-error)
+    needs: [build, desktop, android]
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.build.result == 'success' && needs.desktop.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -145,10 +157,22 @@ jobs:
           path: desktop-dist
           merge-multiple: true
 
+      # absent when the signing secrets are not configured
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: android-apk
+          path: desktop-dist
+
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # mention the APK only when this release actually has one (it needs the signing secrets)
+          if ls desktop-dist/Spotless-*.apk >/dev/null 2>&1; then
+            echo >> notes.md
+            echo "**Android app:** install the Spotless .apk below on your phone (allow installs from your browser or file manager when asked) and point it at your server." >> notes.md
+          fi
           EXTRA=""
           case "$GITHUB_REF_NAME" in *-*) EXTRA="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "Spotless $GITHUB_REF_NAME" --notes-file notes.md $EXTRA desktop-dist/*

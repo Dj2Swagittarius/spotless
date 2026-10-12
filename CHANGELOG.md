@@ -18,6 +18,9 @@ All notable changes to Spotless are listed here. The format follows
   instead of empty results. The reason (for example `network error (ENOTFOUND)` or `Deezer error 4: Quota limit
   exceeded`) is logged, shown on the Discover, Trending and Search pages, and reported under `deezer` in
   `/api/health`.
+- Android app (`android/`): the Spotless UI with native playback — keeps playing with the screen off, lock-screen,
+  notification, Bluetooth and Wear OS controls, EQ, adaptive quality, ReplayGain, sleep timer and AI DJ voice.
+  Release builds attach a signed APK.
 
 ## [0.3.1] - 2026-10-09
 

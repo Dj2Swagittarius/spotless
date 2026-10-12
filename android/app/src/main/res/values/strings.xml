@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Spotless</string>
+    <string name="shortcut_change_server">Change server</string>
+</resources>

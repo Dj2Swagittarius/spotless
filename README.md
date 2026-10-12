@@ -211,6 +211,19 @@ app, then allow it under **System Settings → Privacy & Security → Open Anywa
 To run or build it from source: `cd desktop && npm ci && npm start` (or `npx electron-builder` for an installer for
 the current system, written to `desktop/dist/`).
 
+## Android app
+
+Releases built with signing configured include `Spotless-<version>.apk` on the [releases page](https://github.com/Dj2Swagittarius/spotless/releases). Install it
+on your phone (Android 8 or newer; allow installs from your browser or file manager when asked), enter your
+server's address — the same one you use in a browser — and sign in.
+
+The app shows the same Spotless pages as the browser, but plays music natively: it keeps playing with the screen
+off and has lock-screen, notification, Bluetooth headset and Wear OS controls. EQ, streaming quality, ReplayGain,
+the sleep timer and the AI DJ's voice all work; crossfade is not available in the app yet (songs play gapless).
+
+To build it from source you need JDK 17 and the Android SDK: `cd android && ./gradlew assembleDebug` writes
+`android/app/build/outputs/apk/debug/app-debug.apk`.
+
 ## Configuration
 
 | Env var | Default | Purpose |

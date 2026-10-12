@@ -1,6 +1,8 @@
 'use client';
 
 import { usePlayer } from '@/store/player';
+import { nativeBridge } from './nativeSync';
+import type { NativeBridge } from './nativeBridge';
 
 /**
  * Speaks DJ lines. Server voices (local speech server or a hosted one) come back as
@@ -35,11 +37,14 @@ export function onSpeakingChange(cb: (text: string | null) => void): () => void 
   return () => listeners.delete(cb);
 }
 
+// In the Android app the native player ducks the music itself while the voice plays.
 function duck() {
+  if (nativeBridge()) return;
   usePlayer.getState().setDuck(DUCK_GAIN);
 }
 
 function unduck() {
+  if (nativeBridge()) return;
   usePlayer.getState().setDuck(1);
 }
 
@@ -48,6 +53,7 @@ export function stopSpeaking() {
   current?.pause();
   current = null;
   if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+  nativeBridge()?.send({ type: 'stopSpeaking' });
   unduck();
   if (speaking !== null) setSpeaking(null);
 }
@@ -55,7 +61,11 @@ export function stopSpeaking() {
 function localVoice(): SpeechSynthesisVoice | null {
   const voices = speechSynthesis.getVoices().filter((v) => v.localService);
   const lang = navigator.language?.slice(0, 2) || 'en';
-  return voices.find((v) => v.lang.startsWith(lang) && /natural|neural|premium|enhanced/i.test(v.name)) ?? voices.find((v) => v.lang.startsWith(lang)) ?? null;
+  return (
+    voices.find((v) => v.lang.startsWith(lang) && /natural|neural|premium|enhanced/i.test(v.name)) ??
+    voices.find((v) => v.lang.startsWith(lang)) ??
+    null
+  );
 }
 
 function speakInBrowser(text: string): Promise<void> {
@@ -70,6 +80,29 @@ function speakInBrowser(text: string): Promise<void> {
     u.onend = () => resolve();
     u.onerror = () => resolve();
     speechSynthesis.speak(u);
+  });
+}
+
+/** Standard base64 of raw bytes, in chunks so long clips don't overflow the argument list. */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+let nativeSpeechId = 0;
+
+/** Have the Android app say it (a clip, or its on-device voice); resolves when it is done. */
+function speakNative(bridge: NativeBridge, payload: { audio?: string; mime?: string; text?: string }): Promise<void> {
+  const id = ++nativeSpeechId;
+  return new Promise((resolve) => {
+    const off = bridge.on((e) => {
+      if (e.type === 'speaking' && e.id === id && !e.active) {
+        off();
+        resolve();
+      }
+    });
+    bridge.send({ type: 'speak', id, ...payload });
   });
 }
 
@@ -95,6 +128,11 @@ export async function speak(text: string): Promise<{ error?: string }> {
       if (stale()) return {};
       if (d.off) return {};
       if (d.browser) {
+        const bridge = nativeBridge();
+        if (bridge) {
+          await speakNative(bridge, { text });
+          return {};
+        }
         duck();
         await speakInBrowser(text);
         if (!stale()) unduck();
@@ -104,6 +142,13 @@ export async function speak(text: string): Promise<{ error?: string }> {
     }
     const blob = await res.blob();
     if (stale()) return {};
+    const bridge = nativeBridge();
+    if (bridge) {
+      const audio = bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
+      if (stale()) return {};
+      await speakNative(bridge, { audio, mime: blob.type || 'audio/mpeg' });
+      return {};
+    }
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     current = audio;
