@@ -14,8 +14,8 @@ import app.spotless.android.bridge.BridgeJson
 
 /**
  * Relays between the page and the playback service. The page's `SpotlessNative` object only exists for the
- * configured server origin and only main-frame messages are accepted. `hello` and `changeServer` are
- * answered here; everything else goes to the activity's controller (a session custom command), and service
+ * configured server origin and only main-frame messages are accepted. `hello` (once the controller has
+ * connected) and `changeServer` are answered here; everything else goes to the activity's controller (a session custom command), and service
  * events come back through [send].
  */
 @UnstableApi
@@ -42,9 +42,12 @@ class WebBridge(
     private fun onMessage(text: String) {
         when (BridgeJson.parseCommand(text)) {
             null -> Unit
-            BridgeCommand.Hello -> send(
-                BridgeJson.encode(BridgeEvent.Hello(BridgeJson.VERSION, BuildConfig.VERSION_NAME, listOf("eq", "quality", "sleep", "speak"))),
-            )
+            // Answer once the activity's controller has connected: the page drops its own <audio> on a version match,
+            // so an app whose playback service is unreachable must say version 0 and leave the page to play itself.
+            BridgeCommand.Hello -> activity.whenControllerSettled { connected ->
+                val version = if (connected) BridgeJson.VERSION else 0
+                send(BridgeJson.encode(BridgeEvent.Hello(version, BuildConfig.VERSION_NAME, listOf("eq", "quality", "sleep", "speak"))))
+            }
             BridgeCommand.ChangeServer -> activity.showSetup()
             else -> activity.relayToService(text)
         }

@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private var webView: WebView? = null
     private var bridge: WebBridge? = null
     private var pendingMic: PermissionRequest? = null
+    private var authReloadPending = false
     private var checkJob: Job? = null
 
     // One controller for the activity's lifetime. Page commands that arrive before it connects wait in
@@ -63,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controllerSettled = false
     private val pendingCommands = ArrayDeque<String>()
+    private val settleWaiters = ArrayList<(Boolean) -> Unit>()
     private val serviceCommand = SessionCommand(BridgeJson.CMD, Bundle.EMPTY)
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -143,9 +145,15 @@ class MainActivity : ComponentActivity() {
         screen = Screen.Setup(graph.origin, null, false)
     }
 
-    /** The server said the session is gone: load the server again, which lands on its sign-in page. */
+    /**
+     * The server said the session is gone: load the server again, which lands on its sign-in page. Every 401
+     * reports this (artwork too), so one reload is enough until that page has finished loading; more would wipe
+     * what the user is typing into the sign-in form.
+     */
     fun onAuthLost() {
         val origin = (screen as? Screen.Web)?.origin ?: return
+        if (authReloadPending) return
+        authReloadPending = true
         webView?.loadUrl(origin)
     }
 
@@ -155,7 +163,11 @@ class MainActivity : ComponentActivity() {
             activity = this,
             origin = origin,
             // don't destroy the WebView from inside its own callback; Retry's openWeb tears it down
-            onMainFrameError = { message -> screen = Screen.Unreachable(origin, message) },
+            onMainFrameError = { message ->
+                authReloadPending = false
+                screen = Screen.Unreachable(origin, message)
+            },
+            onPageFinished = { authReloadPending = false },
             onMicrophoneRequest = ::onMicrophoneRequest,
             onMicrophoneCanceled = { request -> if (pendingMic === request) pendingMic = null },
         )
@@ -166,6 +178,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun teardownWeb() {
+        authReloadPending = false
         bridge?.release()
         bridge = null
         pendingMic?.deny()
@@ -185,6 +198,11 @@ class MainActivity : ComponentActivity() {
             c != null -> c.sendCustomCommand(serviceCommand, bundleOf(BridgeJson.KEY to json))
             !controllerSettled -> pendingCommands += json
         }
+    }
+
+    /** Runs [block] with whether the controller connected, immediately if the connection already settled. */
+    fun whenControllerSettled(block: (Boolean) -> Unit) {
+        if (controllerSettled) block(controller != null) else settleWaiters += block
     }
 
     /** Stop and forget the queue (switching servers). */
@@ -218,6 +236,9 @@ class MainActivity : ComponentActivity() {
             val queued = pendingCommands.toList()
             pendingCommands.clear()
             if (connected != null) queued.forEach { connected.sendCustomCommand(serviceCommand, bundleOf(BridgeJson.KEY to it)) }
+            val waiters = settleWaiters.toList()
+            settleWaiters.clear()
+            waiters.forEach { it(connected != null) }
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -243,6 +264,7 @@ class MainActivity : ComponentActivity() {
         controllerFuture = null
         controller = null
         pendingCommands.clear()
+        settleWaiters.clear()
         super.onDestroy()
     }
 

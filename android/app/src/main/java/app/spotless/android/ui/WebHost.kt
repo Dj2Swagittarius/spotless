@@ -19,6 +19,7 @@ object WebHost {
         activity: MainActivity,
         origin: String,
         onMainFrameError: (String) -> Unit,
+        onPageFinished: () -> Unit,
         onMicrophoneRequest: (PermissionRequest) -> Unit,
         onMicrophoneCanceled: (PermissionRequest) -> Unit,
     ): WebView = WebView(activity).apply {
@@ -52,6 +53,10 @@ object WebHost {
                     }
                 }
                 return true
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                onPageFinished()
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
