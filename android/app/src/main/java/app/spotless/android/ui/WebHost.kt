@@ -22,6 +22,14 @@ object WebHost {
         onMicrophoneRequest: (PermissionRequest) -> Unit,
         onMicrophoneCanceled: (PermissionRequest) -> Unit,
     ): WebView = WebView(activity).apply {
+        // chrome://inspect for test builds only
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        // Without explicit match_parent the WebView is wrap_content inside Compose's AndroidView, and Chromium
+        // then resolves every viewport unit (vh/dvh) to 0 — the page's h-dvh layout collapses to nothing.
+        layoutParams = android.view.ViewGroup.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+        )
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         // the page's own player (fallback when the bridge is unavailable) may start without a tap
