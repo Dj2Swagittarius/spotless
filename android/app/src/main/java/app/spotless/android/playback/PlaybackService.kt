@@ -15,6 +15,7 @@ import app.spotless.android.bridge.BridgeEvent
 import app.spotless.android.bridge.BridgeJson
 import app.spotless.android.graph
 import com.google.common.util.concurrent.MoreExecutors
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /** Hosts the engine and the media session: notification, lock screen, Bluetooth, Wear OS. */
@@ -23,17 +24,19 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private lateinit var engine: PlaybackEngine
     private lateinit var callback: SessionCallback
+    private var artworkExecutor: ExecutorService? = null
 
     override fun onCreate() {
         super.onCreate()
         engine = PlaybackEngine(this, graph, ::sendEvent)
-        callback = SessionCallback(engine, packageName)
+        callback = SessionCallback(engine)
         val openApp = packageManager.getLaunchIntentForPackage(packageName)
             ?.let { PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
         // artwork needs the session cookie, so it loads through the same OkHttp client as the audio
+        val executor = Executors.newSingleThreadExecutor().also { artworkExecutor = it }
         val bitmaps = CacheBitmapLoader(
             DataSourceBitmapLoader(
-                MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor()),
+                MoreExecutors.listeningDecorator(executor),
                 OkHttpDataSource.Factory(graph.http),
             ),
         )
@@ -66,6 +69,8 @@ class PlaybackService : MediaSessionService() {
             release()
         }
         session = null
+        artworkExecutor?.shutdown()
+        artworkExecutor = null
         super.onDestroy()
     }
 }

@@ -1,6 +1,7 @@
 package app.spotless.android.playback
 
 import android.os.Bundle
+import android.os.Process
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
@@ -15,13 +16,15 @@ import com.google.common.util.concurrent.ListenableFuture
  * Spotless commands; everyone else — system UI, watches, other apps — gets the standard media commands.
  */
 @UnstableApi
-class SessionCallback(private val engine: PlaybackEngine, private val ownPackage: String) : MediaSession.Callback {
+class SessionCallback(private val engine: PlaybackEngine) : MediaSession.Callback {
     val ownControllers = LinkedHashSet<MediaSession.ControllerInfo>()
 
     private val command = SessionCommand(BridgeJson.CMD, Bundle.EMPTY)
 
+    private fun isOwn(controller: MediaSession.ControllerInfo) = controller.uid == Process.myUid()
+
     override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
-        if (controller.packageName != ownPackage) {
+        if (!isOwn(controller)) {
             // other apps get transport controls only: changing the playlist behind the engine's back would
             // desync its queue mirror and stream arbitrary URIs through the signed-in client
             val transport = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
@@ -44,7 +47,7 @@ class SessionCallback(private val engine: PlaybackEngine, private val ownPackage
         customCommand: SessionCommand,
         args: Bundle,
     ): ListenableFuture<SessionResult> {
-        if (customCommand.customAction == BridgeJson.CMD && controller.packageName == ownPackage) {
+        if (customCommand.customAction == BridgeJson.CMD && isOwn(controller)) {
             args.getString(BridgeJson.KEY)?.let(BridgeJson::parseCommand)?.let(engine::handle)
         }
         return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
