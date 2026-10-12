@@ -114,8 +114,10 @@ jobs:
   # A vX.Y.Z tag (created by `npm run release`) becomes a GitHub Release once its image is
   # published, with that version's CHANGELOG section as the notes and the desktop installers attached.
   release:
+    # android stays in needs so its APK artifact is awaited, but a failed Android build must not block the
+    # server's release (the APK download below is continue-on-error)
     needs: [build, desktop, android]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.build.result == 'success' && needs.desktop.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
