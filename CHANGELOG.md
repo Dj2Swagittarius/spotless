@@ -5,6 +5,12 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- Library: new **New downloads** tab listing albums the scanner found new songs for in the last 30 days, grouped into
+  Today / This week / Earlier this month. An old album that gains a track shows "1 new song". Tracks now record when a
+  scan first saw them (`tracks.added_at`), so a moved or retagged file is not "new" again, and a release whose files
+  keep an old modification time still shows up on the day it lands. Existing libraries backfill from file mtime, and
+  a first-ever import uses mtimes too so the whole library is not "new" at once. Home's "Recently added" uses the same
+  timestamp.
 - Discover, Trending and "Not in your library" search no longer fail silently when Deezer does. All Deezer calls now
   share one client (`src/lib/deezer.ts`) that keeps the whole server under Deezer's 50-requests-per-5-seconds quota
   (Discover, New Releases, Collection gaps, charts and the artwork backfill used to burst independently and could

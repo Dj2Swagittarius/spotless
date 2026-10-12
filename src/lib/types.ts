@@ -51,6 +51,13 @@ export interface Album {
   duration: number;
 }
 
+export interface NewDownload extends Album {
+  /** unix seconds the newest song on the album was first scanned */
+  addedAt: number;
+  /** songs on the album that arrived inside the New downloads window */
+  newTracks: number;
+}
+
 export interface Artist {
   id: number;
   name: string;

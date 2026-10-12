@@ -10,21 +10,38 @@ import SpotifyImport from '@/components/SpotifyImport';
 import PromptModal from '@/components/PromptModal';
 import PlaylistCover from '@/components/PlaylistCover';
 import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
-import type { Album, Artist, Playlist } from '@/lib/types';
+import type { Album, Artist, NewDownload, Playlist } from '@/lib/types';
 
-type Tab = 'playlists' | 'albums' | 'artists';
+type Tab = 'playlists' | 'albums' | 'artists' | 'new';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'playlists', label: 'Playlists' },
   { id: 'albums', label: 'Albums' },
   { id: 'artists', label: 'Artists' },
+  { id: 'new', label: 'New downloads' },
 ];
+
+/** Bucket new downloads by local calendar day so a fresh scan reads as "Today". */
+function groupNewDownloads(items: NewDownload[]): { label: string; items: NewDownload[] }[] {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const today = startOfToday.getTime() / 1000;
+  const week = today - 6 * 86400;
+  const groups = [
+    { label: 'Today', items: [] as NewDownload[] },
+    { label: 'This week', items: [] as NewDownload[] },
+    { label: 'Earlier this month', items: [] as NewDownload[] },
+  ];
+  for (const a of items) groups[a.addedAt >= today ? 0 : a.addedAt >= week ? 1 : 2].items.push(a);
+  return groups.filter((g) => g.items.length > 0);
+}
 
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>('playlists');
   const [albums, setAlbums] = useState<Album[]>([]);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [newDownloads, setNewDownloads] = useState<NewDownload[]>([]);
   const [status, setStatus] = useState<LoadStatus>('loading');
   const [attempt, setAttempt] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -46,11 +63,13 @@ export default function LibraryPage() {
       getJson<Album[]>('/api/albums', init),
       getJson<Artist[]>('/api/artists', init),
       getJson<Playlist[]>('/api/playlists', init),
+      getJson<NewDownload[]>('/api/new-downloads', init),
     ])
-      .then(([al, ar, pl]) => {
+      .then(([al, ar, pl, nd]) => {
         setAlbums(al);
         setArtists(ar);
         setPlaylists(pl);
+        setNewDownloads(nd);
         setStatus('ready');
       })
       .catch((err) => {
@@ -263,6 +282,38 @@ export default function LibraryPage() {
                 </Link>
               ))}
             </div>
+          )}
+        </div>
+      )}
+      {tab === 'new' && (
+        <div role="tabpanel" id="library-panel-new" aria-labelledby="library-tab-new" className="space-y-6">
+          {status === 'loading' ? (
+            <CardGridSkeleton count={7} />
+          ) : (
+            (() => {
+              const shown = mine ? newDownloads.filter((a) => myArtistIds.has(a.artistId)) : newDownloads;
+              if (shown.length === 0) {
+                return (
+                  <p className="text-sm text-subdued">
+                    Nothing new in the last 30 days. Albums show up here as soon as a scan finds new files.
+                  </p>
+                );
+              }
+              return groupNewDownloads(shown).map((g) => (
+                <section key={g.label} aria-label={g.label}>
+                  <h2 className="mb-3 text-lg font-bold">{g.label}</h2>
+                  <CardGrid>
+                    {g.items.map((a) => (
+                      <AlbumCard
+                        key={a.id}
+                        album={a}
+                        note={a.newTracks < a.trackCount ? `${a.newTracks} new ${a.newTracks === 1 ? 'song' : 'songs'}` : undefined}
+                      />
+                    ))}
+                  </CardGrid>
+                </section>
+              ));
+            })()
           )}
         </div>
       )}

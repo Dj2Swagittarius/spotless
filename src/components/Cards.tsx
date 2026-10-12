@@ -9,7 +9,7 @@ export function CardGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 sm:gap-3 lg:grid-cols-5 xl:grid-cols-7">{children}</div>;
 }
 
-export function AlbumCard({ album }: { album: Album }) {
+export function AlbumCard({ album, note }: { album: Album; note?: string }) {
   const playQueue = usePlayer((s) => s.playQueue);
   const play = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -41,6 +41,7 @@ export function AlbumCard({ album }: { album: Album }) {
         {album.year ? `${album.year} · ` : ''}
         {album.artist}
       </div>
+      {note && <div className="truncate text-xs text-accent">{note}</div>}
     </Link>
   );
 }
