@@ -66,6 +66,12 @@ class PlaybackEngine(
     private var nextUid = 0
     private var currentId: String? = null
     private var playedThisStream = false
+
+    /** Media id of an early-ended transcode we are returning to; the hop to the next track and back is not a new play. */
+    private var pendingReturn: String? = null
+
+    /** Failed or unplayable tracks in a row since playback last actually started. */
+    private var consecutiveFailures = 0
     private var volume = 1.0
     private var duck = 1.0
     private var speechDuck = 1.0
@@ -145,7 +151,7 @@ class PlaybackEngine(
             is BridgeCommand.SetVolume -> { volume = cmd.value.coerceIn(0.0, 1.0); applyVolume() }
             is BridgeCommand.SetDuck -> { duck = cmd.value.coerceIn(0.0, 1.0); applyVolume() }
             is BridgeCommand.SetEq -> eq.update(cmd.enabled, cmd.gains.toDoubleArray())
-            is BridgeCommand.SetQuality -> quality.setting = cmd.value
+            is BridgeCommand.SetQuality -> { quality.setting = cmd.value; refreshNext() }
             is BridgeCommand.SetSleepTimer -> setSleep(cmd.minutes)
             is BridgeCommand.Speak -> voice.speak(cmd)
             BridgeCommand.StopSpeaking -> voice.stop()
@@ -165,6 +171,8 @@ class PlaybackEngine(
         queue.set(tracks, index)
         items.clear()
         currentId = null
+        pendingReturn = null
+        consecutiveFailures = 0
         if (queue.index < 0) {
             exo.clearMediaItems()
         } else {
@@ -249,9 +257,10 @@ class PlaybackEngine(
         val info = items[id] ?: return false
         if (info.track.streamUrl != null) return false
         if (countRetry) {
-            if (now() - lastSwitchAt < SWITCH_COOLDOWN_MS || info.restreams >= MAX_RESTREAMS_PER_TRACK) return false
+            if (!canRestream(info)) return false
             info.restreams++
         }
+        val rungChanged = info.spec.rung != rung
         lastSwitchAt = now()
         playedThisStream = false
         tracker.onJump()
@@ -261,7 +270,43 @@ class PlaybackEngine(
         exo.seekTo(index, if (rung.bitrate == 0) (atSec * 1000).toLong() else 0L)
         exo.prepare()
         exo.playWhenReady = wasPlaying
+        // the new stream may stall before it plays, and the state staying BUFFERING raises no event: re-arm the watchdog
+        handler.removeCallbacks(startStall)
+        if (wasPlaying) handler.postDelayed(startStall, START_STALL_MS)
+        if (rungChanged) refreshNext()
         return true
+    }
+
+    /** Whether a counted reload is allowed right now: past the switch cooldown and under the per-track cap. */
+    private fun canRestream(info: ItemInfo) =
+        now() - lastSwitchAt >= SWITCH_COOLDOWN_MS && info.restreams < MAX_RESTREAMS_PER_TRACK
+
+    /** The rung a retry of this item should use: Auto re-evaluates, a fixed setting keeps the item's own. */
+    private fun retryRung(info: ItemInfo): Rung = if (quality.isAuto) quality.current() else info.spec.rung ?: quality.current()
+
+    /**
+     * Where a library transcode stopped (track seconds) if it ended more than 5 s short of the tagged duration,
+     * i.e. the pipe died cleanly and it only looks like the song ended; null when it really ended.
+     */
+    private fun endedEarlyAt(info: ItemInfo, streamPositionMs: Long): Double? {
+        val rung = info.spec.rung ?: return null
+        if (!info.track.isLibrary || rung.bitrate == 0 || info.track.duration <= 0) return null
+        val endedAt = info.spec.offsetSec + streamPositionMs / 1000.0
+        return endedAt.takeIf { info.track.duration - it > 5 }
+    }
+
+    /**
+     * Quality follows the setting for the track queued after the current one: rebuild it (library tracks only,
+     * from the start) if it was built at another rung. The playing track is never reloaded for this.
+     */
+    private fun refreshNext() {
+        val index = exo.nextMediaItemIndex
+        if (index == C.INDEX_UNSET || index == exo.currentMediaItemIndex) return
+        val id = exo.getMediaItemAt(index).mediaId
+        val info = items[id] ?: return
+        val rung = quality.current()
+        if (!info.track.isLibrary || info.spec.rung == rung) return
+        exo.replaceMediaItem(index, buildItem(info.track, rung, 0.0, reuseId = id))
     }
 
     /** A genuine rebuffer: score it (Auto walks down) and reload where a reload can help. */
@@ -282,10 +327,22 @@ class PlaybackEngine(
     private fun onNetwork(info: NetworkInfo) {
         quality.network = info
         if (!quality.isAuto) return
-        val have = current()?.spec?.rung ?: return
+        val have = current()?.spec?.rung
         val want = quality.current()
-        // only ever act mid-track to go down; an upgrade waits for the next track
-        if (QualityPolicy.isLower(want, have)) restreamCurrent(want, positionSec(), countRetry = true)
+        // only ever reload the playing track to go down; an upgrade (or a downgrade the cooldown declined)
+        // still reaches the track queued next
+        if (have != null && QualityPolicy.isLower(want, have)) restreamCurrent(want, positionSec(), countRetry = true)
+        refreshNext()
+    }
+
+    /** Consecutive failures after which we stop skipping and wait for the user (a short queue is capped by its size). */
+    private fun failureLimit() = minOf(exo.mediaItemCount, MAX_SKIPS_IN_A_ROW)
+
+    /** Report the track and stop where it is; the next Play re-prepares it. */
+    private fun pauseFailed(info: ItemInfo?) {
+        info?.let { emit(BridgeEvent.TrackError(it.track.id, "could not be played")) }
+        exo.pause()
+        emitState()
     }
 
     private fun skipFailed(info: ItemInfo?) {
@@ -304,6 +361,17 @@ class PlaybackEngine(
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         val id = mediaItem?.mediaId
+        pendingReturn?.let { returning ->
+            if (id == returning) {
+                // back on the track whose transcode died: it is being restreamed, not newly played
+                pendingReturn = null
+                applyVolume()
+                emitState()
+                return
+            }
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) return // only passing through on the way back
+            pendingReturn = null // something else took over
+        }
         // a restream replaced the playing item with itself: not a new play
         if (id != null && id == currentId && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
             applyVolume()
@@ -313,29 +381,35 @@ class PlaybackEngine(
         currentId = id
         queue.index = if (exo.mediaItemCount > 0) exo.currentMediaItemIndex else -1
         handler.removeCallbacks(startStall)
-        playedThisStream = false
+        // a gapless hop is already playing; anything else has to start before the first rebuffer counts
+        playedThisStream = exo.isPlaying && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
         val info = id?.let(items::get)
         if (info == null) { emitState(); return }
         if (!info.track.isPlayable) {
-            handler.post { if (exo.hasNextMediaItem()) exo.seekToNextMediaItem() else exo.pause() }
+            // a placeholder counts as a failure so a queue of them cannot skip forever
+            if (++consecutiveFailures >= failureLimit()) exo.pause()
+            else handler.post { if (exo.hasNextMediaItem()) exo.seekToNextMediaItem() else exo.pause() }
+            emitState()
             return
         }
         info.restreams = 0
-        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT && info.spec.offsetSec > 0) {
-            // repeat-one of a transcode resumed partway in: start the stream from the top
-            handler.post { restreamCurrent(info.spec.rung ?: quality.current(), 0.0, countRetry = false) }
+        if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && info.spec.offsetSec > 0) {
+            // a transcode built partway in (restored, or restreamed earlier) was reached again: start it from the top
+            handler.post { if (currentId == id) restreamCurrent(info.spec.rung ?: quality.current(), 0.0, countRetry = false) }
         }
         tracker.begin(info.track.id, info.track.duration, info.track.isLibrary)
         if (exo.isPlaying) tracker.onPlaying()?.let(::report)
         applyVolume()
         emitState()
         persistSoon()
+        refreshNext()
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         handler.removeCallbacks(tick)
         if (isPlaying) {
             playedThisStream = true
+            consecutiveFailures = 0
             handler.removeCallbacks(startStall)
             tracker.onPlaying()?.let(::report)
             handler.postDelayed(tick, 1000)
@@ -357,36 +431,52 @@ class PlaybackEngine(
             }
         }
         if (state == Player.STATE_READY) handler.removeCallbacks(startStall)
+        if (state == Player.STATE_ENDED && restreamEndedEarly()) return
         emitState()
     }
 
     override fun onPlayerError(error: PlaybackException) {
         val info = current()
-        val status = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
-        if (status == 401) return // AuthInterceptor already reported it; the next play re-prepares
+        if (isUnauthorized(error)) return // AuthInterceptor already reported it; the next play re-prepares
         val unsupported = error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
             error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED
         if (info != null && info.track.streamUrl == null && !unsupported) {
             if (quality.isAuto) quality.noteStall()
-            val rung = if (quality.isAuto) quality.current() else info.spec.rung ?: quality.current()
-            if (restreamCurrent(rung, positionSec(), countRetry = true)) return
+            if (restreamCurrent(retryRung(info), positionSec(), countRetry = true)) return
         }
-        skipFailed(info)
+        consecutiveFailures++
+        // no connection: the next track would fail too, so wait for the user instead of skipping through the queue
+        val offline = error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+        if (offline || consecutiveFailures >= failureLimit()) pauseFailed(info) else skipFailed(info)
     }
+
+    /** A 401 anywhere in the cause chain (the data source wraps it). */
+    private fun isUnauthorized(error: Throwable) =
+        generateSequence(error) { it.cause }.any { it is HttpDataSource.InvalidResponseCodeException && it.responseCode == 401 }
 
     override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
         if (reason != Player.DISCONTINUITY_REASON_AUTO_TRANSITION) return
         // a transcode pipe that died cleanly reads as the song ending early: go back and pick it up
         val id = oldPosition.mediaItem?.mediaId ?: return
         val info = items[id] ?: return
-        val rung = info.spec.rung ?: return
-        if (rung.bitrate == 0 || info.track.duration <= 0 || info.restreams >= MAX_RESTREAMS_PER_TRACK) return
-        val endedAt = info.spec.offsetSec + oldPosition.positionMs / 1000.0
-        if (info.track.duration - endedAt <= 5) return
+        val endedAt = endedEarlyAt(info, oldPosition.positionMs) ?: return
+        if (!canRestream(info)) return
+        // recorded now: ExoPlayer announces the hop to the next track right after this, and it must not count as a play
+        pendingReturn = id
         handler.post {
+            if (currentId != id) return@post // overtaken by another change
             exo.seekTo(oldPosition.mediaItemIndex, 0)
-            restreamCurrent(if (quality.isAuto) quality.current() else rung, endedAt, countRetry = true)
+            pendingReturn = null
+            restreamCurrent(retryRung(info), endedAt, countRetry = true)
         }
+    }
+
+    /** The final track's transcode died early: nothing follows it, so reload it where it stopped. */
+    private fun restreamEndedEarly(): Boolean {
+        val info = current() ?: return false
+        val endedAt = endedEarlyAt(info, exo.currentPosition) ?: return false
+        return canRestream(info) && restreamCurrent(retryRung(info), endedAt, countRetry = true)
     }
 
     override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -514,5 +604,6 @@ class PlaybackEngine(
         const val STALL_GRACE_MS = 4_000L
         const val START_STALL_MS = 12_000L
         const val MAX_RESTREAMS_PER_TRACK = 4
+        const val MAX_SKIPS_IN_A_ROW = 5
     }
 }
