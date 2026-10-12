@@ -20,6 +20,7 @@ object WebHost {
         origin: String,
         onMainFrameError: (String) -> Unit,
         onMicrophoneRequest: (PermissionRequest) -> Unit,
+        onMicrophoneCanceled: (PermissionRequest) -> Unit,
     ): WebView = WebView(activity).apply {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
@@ -32,10 +33,15 @@ object WebHost {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 if (UrlPolicy.decide(origin, url) == UrlPolicy.Decision.IN_APP) return false
-                try {
-                    activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                } catch (_: ActivityNotFoundException) {
-                    // nothing can open it; stay put
+                // only a main-frame navigation may leave the app, and only to a browser or mail app; file:, content:,
+                // intent:, javascript: and the rest are dropped, and so is any other frame's attempt
+                val scheme = request.url.scheme?.lowercase()
+                if (request.isForMainFrame && (scheme == "http" || scheme == "https" || scheme == "mailto")) {
+                    try {
+                        activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    } catch (_: ActivityNotFoundException) {
+                        // nothing can open it; stay put
+                    }
                 }
                 return true
             }
@@ -53,6 +59,10 @@ object WebHost {
                 } else {
                     request.deny()
                 }
+            }
+
+            override fun onPermissionRequestCanceled(request: PermissionRequest) {
+                onMicrophoneCanceled(request)
             }
         }
     }

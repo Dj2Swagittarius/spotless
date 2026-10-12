@@ -3,26 +3,43 @@ package app.spotless.android.ui
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.ComponentName
 import android.os.Bundle
+import android.view.ViewGroup
 import android.webkit.PermissionRequest
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.os.bundleOf
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import androidx.media3.session.SessionToken
+import app.spotless.android.bridge.BridgeEvent
+import app.spotless.android.bridge.BridgeJson
 import app.spotless.android.graph
 import app.spotless.android.net.Health
 import app.spotless.android.net.ServerAddress
+import app.spotless.android.playback.PlaybackService
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @UnstableApi
@@ -38,6 +55,15 @@ class MainActivity : ComponentActivity() {
     private var webView: WebView? = null
     private var bridge: WebBridge? = null
     private var pendingMic: PermissionRequest? = null
+    private var checkJob: Job? = null
+
+    // One controller for the activity's lifetime. Page commands that arrive before it connects wait in
+    // pendingCommands and are flushed once; if the connection fails they are dropped (the page plays by itself).
+    private var controller: MediaController? = null
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var controllerSettled = false
+    private val pendingCommands = ArrayDeque<String>()
+    private val serviceCommand = SessionCommand(BridgeJson.CMD, Bundle.EMPTY)
 
     private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         pendingMic?.let { if (granted) it.grant(it.resources) else it.deny() }
@@ -46,13 +72,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        connectController()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 when (val s = screen) {
                     Screen.Loading -> Unit
-                    is Screen.Setup -> SetupScreen(s.initial, s.error, s.checking) { input -> lifecycleScope.launch { connect(input) } }
+                    is Screen.Setup -> SetupScreen(s.initial, s.error, s.checking) { input -> connect(input) }
                     // keyed on the instance: a new WebView (after Retry or a server change) gets a fresh AndroidView
-                    is Screen.Web -> webView?.let { view -> key(view) { AndroidView(factory = { view }) } }
+                    is Screen.Web -> webView?.let { view ->
+                        key(view) { AndroidView(factory = { view }, modifier = Modifier.fillMaxSize().safeDrawingPadding()) }
+                    }
                     is Screen.Unreachable -> UnreachableScreen(s.origin, s.message, onRetry = { start(s.origin) }, onChangeServer = ::showSetup)
                 }
             }
@@ -66,6 +96,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         if (intent.action == ACTION_CHANGE_SERVER) showSetup()
     }
 
@@ -75,7 +106,8 @@ class MainActivity : ComponentActivity() {
             return
         }
         screen = Screen.Loading
-        lifecycleScope.launch {
+        checkJob?.cancel()
+        checkJob = lifecycleScope.launch {
             when (val health = graph.api.health(origin)) {
                 is Health.Ok -> openWeb(origin)
                 is Health.Problem -> screen = Screen.Unreachable(origin, health.message)
@@ -83,24 +115,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun connect(input: String) {
+    private fun connect(input: String) {
         val origin = ServerAddress.normalize(input)
         if (origin == null) {
             screen = Screen.Setup(input, "Enter a server address like nas:4000 or http://192.168.1.10:3000.", false)
             return
         }
         screen = Screen.Setup(input, null, true)
-        when (val health = graph.api.health(origin)) {
-            is Health.Ok -> {
-                if (origin != graph.origin) bridge?.stopPlayback()
-                graph.setOrigin(origin)
-                openWeb(origin)
+        checkJob?.cancel()
+        checkJob = lifecycleScope.launch {
+            when (val health = graph.api.health(origin)) {
+                is Health.Ok -> {
+                    if (origin != graph.origin) stopPlayback()
+                    graph.setOrigin(origin)
+                    openWeb(origin)
+                }
+                is Health.Problem -> screen = Screen.Setup(input, health.message, false)
             }
-            is Health.Problem -> screen = Screen.Setup(input, health.message, false)
         }
     }
 
     fun showSetup() {
+        // a late health result must not overwrite the setup screen (openWeb's own teardown runs inside that job, so it does not cancel)
+        checkJob?.cancel()
+        checkJob = null
         teardownWeb()
         screen = Screen.Setup(graph.origin, null, false)
     }
@@ -119,6 +157,7 @@ class MainActivity : ComponentActivity() {
             // don't destroy the WebView from inside its own callback; Retry's openWeb tears it down
             onMainFrameError = { message -> screen = Screen.Unreachable(origin, message) },
             onMicrophoneRequest = ::onMicrophoneRequest,
+            onMicrophoneCanceled = { request -> if (pendingMic === request) pendingMic = null },
         )
         bridge = WebBridge(this, view, origin).also { it.install() }
         webView = view
@@ -129,8 +168,63 @@ class MainActivity : ComponentActivity() {
     private fun teardownWeb() {
         bridge?.release()
         bridge = null
-        webView?.destroy()
+        pendingMic?.deny()
+        pendingMic = null
+        webView?.let { view ->
+            // still attached to the Compose AndroidView: detach before destroying
+            (view.parent as? ViewGroup)?.removeView(view)
+            view.destroy()
+        }
         webView = null
+    }
+
+    /** A page command for the playback service; queued until the controller connects, dropped if it never does. */
+    fun relayToService(json: String) {
+        val c = controller
+        when {
+            c != null -> c.sendCustomCommand(serviceCommand, bundleOf(BridgeJson.KEY to json))
+            !controllerSettled -> pendingCommands += json
+        }
+    }
+
+    /** Stop and forget the queue (switching servers). */
+    private fun stopPlayback() {
+        pendingCommands.clear()
+        controller?.run {
+            stop()
+            clearMediaItems()
+        }
+    }
+
+    private fun connectController() {
+        val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
+        val future = MediaController.Builder(this, token)
+            .setListener(object : MediaController.Listener {
+                override fun onCustomCommand(
+                    controller: MediaController,
+                    command: SessionCommand,
+                    args: Bundle,
+                ): ListenableFuture<SessionResult> {
+                    if (command.customAction == BridgeJson.EVT) args.getString(BridgeJson.KEY)?.let(::onServiceEvent)
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+            })
+            .buildAsync()
+        controllerFuture = future
+        future.addListener({
+            controllerSettled = true
+            val connected = runCatching { future.get() }.getOrNull()
+            controller = connected
+            val queued = pendingCommands.toList()
+            pendingCommands.clear()
+            if (connected != null) queued.forEach { connected.sendCustomCommand(serviceCommand, bundleOf(BridgeJson.KEY to it)) }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun onServiceEvent(json: String) {
+        bridge?.send(json)
+        val event = runCatching { BridgeJson.json.decodeFromString(BridgeEvent.serializer(), json) }.getOrNull()
+        if (event == BridgeEvent.AuthLost) onAuthLost()
     }
 
     private fun onMicrophoneRequest(request: PermissionRequest) {
@@ -145,6 +239,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         teardownWeb()
+        controllerFuture?.let(MediaController::releaseFuture)
+        controllerFuture = null
+        controller = null
+        pendingCommands.clear()
         super.onDestroy()
     }
 

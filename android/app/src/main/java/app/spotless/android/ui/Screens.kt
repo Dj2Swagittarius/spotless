@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -31,7 +32,7 @@ import androidx.compose.ui.unit.dp
 fun SetupScreen(initial: String?, error: String?, checking: Boolean, onConnect: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf(initial.orEmpty()) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
             Text("Connect to your Spotless server", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text(
@@ -63,7 +64,7 @@ fun SetupScreen(initial: String?, error: String?, checking: Boolean, onConnect: 
 @Composable
 fun UnreachableScreen(origin: String, message: String, onRetry: () -> Unit, onChangeServer: () -> Unit) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Column(Modifier.safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
             Text("Can't reach $origin", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text(message, style = MaterialTheme.typography.bodyMedium)
