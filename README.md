@@ -213,7 +213,7 @@ the current system, written to `desktop/dist/`).
 
 ## Android app
 
-Releases built with signing configured include `Spotless-<version>.apk` on the [releases page](https://github.com/Dj2Swagittarius/spotless/releases). Install it
+Each [release](https://github.com/Dj2Swagittarius/spotless/releases) from 0.4.0 on includes `Spotless-X.Y.Z.apk`. Install it
 on your phone (Android 8 or newer; allow installs from your browser or file manager when asked), enter your
 server's address — the same one you use in a browser — and sign in.
 
@@ -442,7 +442,9 @@ npm run release -- patch
 
 That bumps `package.json`, dates the changelog section, commits `Release vX.Y.Z` and tags it (`--dry-run`
 previews). Push with `git push origin main --follow-tags`; CI publishes the `:X.Y.Z` / `:X.Y` image tags,
-builds the desktop installers and creates the GitHub Release from the changelog section with the installers attached.
+builds the desktop installers and the signed Android APK, and creates the GitHub Release from the changelog section
+with them attached. The APK is signed with the key in the `ANDROID_KEYSTORE_*` / `ANDROID_KEY_*` repository secrets;
+keep a backup of that keystore, because an APK signed with a different key cannot update an installed app.
 
 ## Security model — read this
 
