@@ -5,6 +5,8 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-24
+
 - Library: new **New downloads** tab listing albums the scanner found new songs for in the last 30 days, grouped into
   Today / This week / Earlier this month. An old album that gains a track shows "1 new song". Tracks now record when a
   scan first saw them (`tracks.added_at`), so a moved or retagged file is not "new" again, and a release whose files
