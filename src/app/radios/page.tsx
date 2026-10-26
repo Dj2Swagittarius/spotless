@@ -6,6 +6,7 @@ import { LoadErrorState } from '@/components/Cards';
 import { PlayIcon, PauseIcon, RadioIcon, XIcon } from '@/components/Icons';
 import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
 import { stationTrack, type RadioStation } from '@/lib/types';
+import { useEscape } from '@/lib/client/escapeStack';
 
 interface FormState {
   id: number | null; // null = creating
@@ -20,6 +21,7 @@ export default function RadiosPage() {
   const [attempt, setAttempt] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
+  useEscape(!!form, () => setForm(null));
   const [formError, setFormError] = useState('');
   // selectors: only the current track and play state matter here, not every store change
   const current = usePlayer((s) => (s.index >= 0 ? (s.queue[s.index] ?? null) : null));
@@ -111,6 +113,7 @@ export default function RadiosPage() {
           <div className="fixed inset-0 z-90 bg-black/60" onClick={() => setForm(null)} aria-hidden />
           <div
             role="dialog"
+            data-overlay
             aria-label={form.id ? 'Edit station' : 'Add station'}
             className="fixed left-1/2 top-1/2 z-95 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg bg-elevated p-5 shadow-dialog"
           >

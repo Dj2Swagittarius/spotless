@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useEscape } from '@/lib/client/escapeStack';
 
 interface Props {
   title: string;
@@ -18,10 +19,8 @@ export default function PromptModal({ title, placeholder, initial = '', submitLa
 
   useEffect(() => {
     inputRef.current?.select();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
+  useEscape(true, onClose);
 
   const submit = async () => {
     const v = value.trim();
@@ -32,7 +31,7 @@ export default function PromptModal({ title, placeholder, initial = '', submitLa
 
   return (
     <div className="fixed inset-0 z-90 flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-lg bg-elevated p-5 shadow-dialog" onClick={(e) => e.stopPropagation()}>
+      <div data-overlay role="dialog" aria-label={title} className="w-full max-w-sm rounded-lg bg-elevated p-5 shadow-dialog" onClick={(e) => e.stopPropagation()}>
         <h2 className="mb-3 text-lg font-bold">{title}</h2>
         <input
           ref={inputRef}

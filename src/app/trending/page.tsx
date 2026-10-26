@@ -5,6 +5,7 @@ import { PlayIcon, PauseIcon } from '@/components/Icons';
 import { LoadErrorState } from '@/components/Cards';
 import { RowListSkeleton } from '@/components/Skeleton';
 import { getJson, isAbortError, type LoadStatus } from '@/lib/http';
+import { useEscape } from '@/lib/client/escapeStack';
 
 interface TrendTrack {
   rank: number;
@@ -101,6 +102,7 @@ export default function TrendingPage() {
   // and an empty chart after the reload means "unavailable", not "still loading"
   const [chartLoading, setChartLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  useEscape(drawerOpen, () => setDrawerOpen(false));
   const [lidarrConfigured, setLidarrConfigured] = useState(false);
   const [dlState, setDlState] = useState<Record<string, DlStatus>>({});
   const [playingKey, setPlayingKey] = useState<string | null>(null);
@@ -310,6 +312,7 @@ export default function TrendingPage() {
         <div className="fixed inset-0 z-90 flex items-end justify-center bg-black/70 md:items-center" onClick={() => setDrawerOpen(false)}>
           <div
             role="dialog"
+            data-overlay
             aria-label="Chart region"
             className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl bg-elevated p-4 shadow-dialog md:max-w-sm md:rounded-lg"
             onClick={(e) => e.stopPropagation()}

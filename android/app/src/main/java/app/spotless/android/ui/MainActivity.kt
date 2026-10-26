@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.ComponentName
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.ViewGroup
 import android.webkit.PermissionRequest
 import android.webkit.WebView
@@ -83,7 +84,14 @@ class MainActivity : ComponentActivity() {
                     is Screen.Setup -> SetupScreen(s.initial, s.error, s.checking) { input -> connect(input) }
                     // keyed on the instance: a new WebView (after Retry or a server change) gets a fresh AndroidView
                     is Screen.Web -> webView?.let { view ->
-                        key(view) { AndroidView(factory = { view }, modifier = Modifier.fillMaxSize().safeDrawingPadding()) }
+                        key(view) {
+                            AndroidView(
+                                factory = { view },
+                                modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+                                // focused from the start, so the remote's D-pad reaches the page
+                                update = { if (!it.hasFocus()) it.requestFocus() },
+                            )
+                        }
                     }
                     is Screen.Unreachable -> UnreachableScreen(s.origin, s.message, onRetry = { start(s.origin) }, onChangeServer = ::showSetup)
                 }
@@ -91,7 +99,15 @@ class MainActivity : ComponentActivity() {
         }
         onBackPressedDispatcher.addCallback(this) {
             val view = webView
-            if (screen is Screen.Web && view != null && view.canGoBack()) view.goBack() else moveTaskToBack(true)
+            if (screen !is Screen.Web || view == null) {
+                moveTaskToBack(true)
+                return@addCallback
+            }
+            // the page closes its newest open menu or dialog first; only then does back leave the page
+            view.evaluateJavascript("window.__spotlessBack ? window.__spotlessBack() : false") { handled ->
+                if (handled == "true" || view !== webView) return@evaluateJavascript
+                if (view.canGoBack()) view.goBack() else moveTaskToBack(true)
+            }
         }
         if (intent?.action == ACTION_CHANGE_SERVER) showSetup() else start(graph.origin)
     }
@@ -171,6 +187,7 @@ class MainActivity : ComponentActivity() {
             onMicrophoneRequest = ::onMicrophoneRequest,
             onMicrophoneCanceled = { request -> if (pendingMic === request) pendingMic = null },
         )
+        view.setOnKeyListener { _, _, event -> onMediaKey(event) }
         bridge = WebBridge(this, view, origin).also { it.install() }
         webView = view
         view.loadUrl(origin)
@@ -189,6 +206,27 @@ class MainActivity : ComponentActivity() {
             view.destroy()
         }
         webView = null
+    }
+
+    /**
+     * A TV remote's media keys go straight to the player, before the WebView can swallow them. Down does the work
+     * and the matching up is consumed with it.
+     */
+    private fun onMediaKey(event: KeyEvent): Boolean {
+        val c = controller
+        if (c == null || event.keyCode !in MEDIA_KEYS) return false
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> if (c.isPlaying) c.pause() else c.play()
+                KeyEvent.KEYCODE_MEDIA_PLAY -> c.play()
+                KeyEvent.KEYCODE_MEDIA_PAUSE -> c.pause()
+                KeyEvent.KEYCODE_MEDIA_NEXT -> if (event.repeatCount == 0) c.seekToNext()
+                KeyEvent.KEYCODE_MEDIA_PREVIOUS -> if (event.repeatCount == 0) c.seekToPrevious()
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> c.seekTo((c.currentPosition + SEEK_STEP_MS).coerceAtMost(c.duration.coerceAtLeast(0)))
+                KeyEvent.KEYCODE_MEDIA_REWIND -> c.seekTo((c.currentPosition - SEEK_STEP_MS).coerceAtLeast(0))
+            }
+        }
+        return true
     }
 
     /** A page command for the playback service; queued until the controller connects, dropped if it never does. */
@@ -270,5 +308,16 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_CHANGE_SERVER = "app.spotless.android.CHANGE_SERVER"
+        private const val SEEK_STEP_MS = 10_000L
+        private val MEDIA_KEYS = setOf(
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_HEADSETHOOK,
+            KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE,
+            KeyEvent.KEYCODE_MEDIA_NEXT,
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+            KeyEvent.KEYCODE_MEDIA_REWIND,
+        )
     }
 }

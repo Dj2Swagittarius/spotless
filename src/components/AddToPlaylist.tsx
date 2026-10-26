@@ -7,6 +7,7 @@ import PromptModal from './PromptModal';
 import { usePlayer } from '@/store/player';
 import { useLikes } from '@/store/likes';
 import type { Playlist, Track } from '@/lib/types';
+import { useEscape } from '@/lib/client/escapeStack';
 
 interface Props {
   /** One song (queue + like + playlist entries). */
@@ -33,6 +34,7 @@ export default function AddToPlaylist({ track, tracks, label, className, size = 
   const list = (tracks ?? (track ? [track] : [])).filter((t) => !t.missing && t.id > 0);
   const single = tracks ? undefined : list[0];
   const [open, setOpen] = useState(false);
+  useEscape(open, () => setOpen(false));
   const [pos, setPos] = useState<React.CSSProperties>({});
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [added, setAdded] = useState<string | null>(null);
@@ -68,16 +70,13 @@ export default function AddToPlaylist({ track, tracks, label, className, size = 
       if (!menuRef.current?.contains(e.target as Node)) setOpen(false);
     };
     const close = () => setOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
     document.addEventListener('mousedown', onDown);
     document.addEventListener('touchstart', onDown);
-    document.addEventListener('keydown', onKey);
     window.addEventListener('resize', close);
     window.addEventListener('scroll', onScroll, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('touchstart', onDown);
-      document.removeEventListener('keydown', onKey);
       window.removeEventListener('resize', close);
       window.removeEventListener('scroll', onScroll, true);
     };
@@ -164,6 +163,7 @@ export default function AddToPlaylist({ track, tracks, label, className, size = 
           <div
             ref={menuRef}
             role="menu"
+            data-overlay
             style={{ position: 'fixed', ...pos, width: MENU_W, maxHeight: MENU_MAX_H }}
             className="z-95 overflow-y-auto rounded-md border border-highlight bg-elevated p-1 shadow-dialog"
             onClick={stop}

@@ -10,6 +10,7 @@ import SetupWizard from './SetupWizard';
 import DjBooth from './DjBooth';
 import { useLikes } from '@/store/likes';
 import { applyTheme, loadTheme } from '@/lib/themes';
+import { installTvNav } from '@/lib/client/tvNav';
 
 type Gate = 'loading' | 'setup' | 'login' | 'ready';
 
@@ -19,6 +20,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
 
   // the <head> script already set data-theme; this drops unknown ids and syncs the theme-color meta
   useEffect(() => applyTheme(loadTheme()), []);
+  useEffect(installTvNav, []);
 
   useEffect(() => {
     fetch('/api/users', { cache: 'no-store' })

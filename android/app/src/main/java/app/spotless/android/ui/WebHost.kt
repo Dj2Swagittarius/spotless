@@ -1,8 +1,12 @@
 package app.spotless.android.ui
 
 import android.annotation.SuppressLint
+import android.app.UiModeManager
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
@@ -14,6 +18,10 @@ import app.spotless.android.BuildConfig
 
 /** Builds the WebView that shows the server's pages. */
 object WebHost {
+    fun isTv(context: Context): Boolean =
+        (context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
     @SuppressLint("SetJavaScriptEnabled")
     fun create(
         activity: MainActivity,
@@ -35,7 +43,12 @@ object WebHost {
         settings.domStorageEnabled = true
         // the page's own player (fallback when the bridge is unavailable) may start without a tap
         settings.mediaPlaybackRequiresUserGesture = false
-        settings.userAgentString = settings.userAgentString + " SpotlessAndroid/" + BuildConfig.VERSION_NAME
+        // the page turns on D-pad navigation when it sees SpotlessTV
+        settings.userAgentString = settings.userAgentString + " SpotlessAndroid/" + BuildConfig.VERSION_NAME +
+            if (isTv(activity)) " SpotlessTV" else ""
+        // key events (the remote's D-pad) only reach a focused WebView
+        isFocusable = true
+        isFocusableInTouchMode = true
         setBackgroundColor(android.graphics.Color.BLACK)
 
         webViewClient = object : WebViewClient() {
@@ -56,6 +69,7 @@ object WebHost {
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                if (!view.hasFocus()) view.requestFocus()
                 onPageFinished()
             }
 

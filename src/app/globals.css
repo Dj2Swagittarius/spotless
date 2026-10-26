@@ -118,6 +118,11 @@
   /* no border-radius here: it squared off rounded-full controls; the outline follows the element's own radius */
   outline-offset: 2px;
 }
+/* Android TV: read from across the room, so the ring is thick and white */
+.tv :focus-visible {
+  outline: 3px solid var(--color-white);
+  outline-offset: 3px;
+}
 
 /* faster taps + no accidental double-tap zoom on controls */
 button,

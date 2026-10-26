@@ -5,6 +5,14 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- Android TV: the app now works with a TV remote. Arrow keys move between controls (a text field keeps Left/Right
+  for its caret until the end, a slider keeps them for its value), the focused control gets a thick white ring, and
+  an open menu or dialog keeps focus until it closes. Spotless appears on the TV home screen with its own banner.
+- Android: Back closes the newest open menu, dialog, queue or lyrics panel before leaving the page, and focus returns
+  to the control that opened it. Remote and headset media keys (play/pause, next, previous, fast-forward, rewind)
+  go straight to the player.
+- Escape now closes the queue, lyrics, profile menu, station form and chart-region picker too, newest first.
+
 ## [0.4.0] - 2026-10-24
 
 - Library: new **New downloads** tab listing albums the scanner found new songs for in the last 30 days, grouped into

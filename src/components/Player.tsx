@@ -22,6 +22,7 @@ import {
 import type { Track } from '@/lib/types';
 import Lyrics from './Lyrics';
 import AddToPlaylist from './AddToPlaylist';
+import { useEscape } from '@/lib/client/escapeStack';
 import {
   PlayIcon,
   PauseIcon,
@@ -152,6 +153,9 @@ export default function Player() {
   const [showQueue, setShowQueue] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [expanded, setExpanded] = useState(false); // mobile: mini vs full player
+  useEscape(showLyrics, () => setShowLyrics(false));
+  useEscape(showQueue, () => setShowQueue(false));
+  useEscape(expanded, () => setExpanded(false));
   const [webSleepUntil, setSleepUntil] = useState<number | null>(null);
   const sleepUntil = nativeState.active ? nativeState.sleepUntil : webSleepUntil;
   const pathname = usePathname();
@@ -857,7 +861,7 @@ export default function Player() {
         <>
           {/* tap anywhere outside to close */}
           <div className="fixed inset-0 z-84 bg-black/40 md:z-40" onClick={() => setShowQueue(false)} aria-hidden />
-          <div className="fixed inset-x-2 bottom-56 z-85 max-h-[55vh] overflow-y-auto rounded-lg border border-highlight bg-elevated p-3 shadow-dialog md:inset-x-auto md:bottom-24 md:right-2 md:z-50 md:w-80">
+          <div data-overlay className="fixed inset-x-2 bottom-56 z-85 max-h-[55vh] overflow-y-auto rounded-lg border border-highlight bg-elevated p-3 shadow-dialog md:inset-x-auto md:bottom-24 md:right-2 md:z-50 md:w-80">
             <div className="mb-2 flex items-center justify-between">
               <span className="font-bold">Queue</span>
               <div className="flex items-center gap-2">

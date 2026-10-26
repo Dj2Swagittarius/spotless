@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { SearchIcon, HomeIcon, GearIcon } from './Icons';
 import { Logo } from './Logo';
+import { useEscape } from '@/lib/client/escapeStack';
 
 interface User {
   id: number;
@@ -18,6 +19,7 @@ export default function TopBar() {
   const [q, setQ] = useState('');
   const [me, setMe] = useState<User | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  useEscape(menuOpen, () => setMenuOpen(false));
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -90,7 +92,7 @@ export default function TopBar() {
           {me ? me.name.charAt(0).toUpperCase() : '?'}
         </button>
         {menuOpen && (
-          <div className="absolute right-0 top-12 z-50 w-56 rounded-lg bg-card p-1 shadow-dialog">
+          <div data-overlay className="absolute right-0 top-12 z-50 w-56 rounded-lg bg-card p-1 shadow-dialog">
             <div className="flex items-center gap-3 px-3 py-2.5">
               <span
                 className="flex h-9 w-9 items-center justify-center rounded-full text-base font-extrabold text-black"
