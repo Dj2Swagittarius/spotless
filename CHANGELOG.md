@@ -5,6 +5,8 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-26
+
 - Android TV: the app now works with a TV remote. Arrow keys move between controls (a text field keeps Left/Right
   for its caret until the end, a slider keeps them for its value), the focused control gets a thick white ring, and
   an open menu or dialog keeps focus until it closes. Spotless appears on the TV home screen with its own banner.
