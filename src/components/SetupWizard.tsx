@@ -258,7 +258,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
               </div>
               {scanning && <div className="text-sm text-subdued">Reading tags — bigger libraries take a few minutes…</div>}
               {trackCount !== null && !scanning && (
-                <div className="step-enter text-base font-bold text-accent">✓ Found {trackCount.toLocaleString()} tracks</div>
+                <div className="step-enter text-[1rem] leading-normal font-bold text-accent">✓ Found {trackCount.toLocaleString()} tracks</div>
               )}
               <div className="flex justify-between pt-2">
                 <SkipButton to={3} />

@@ -358,7 +358,7 @@ export default function DjPage() {
               Your personal DJ knows your library and listening history. Ask for a vibe, a playlist, a deep dive on an artist, or songs you
               don’t own yet.
             </p>
-            <button className="btn-primary px-8 py-3 text-base" onClick={() => send('Start my DJ')} disabled={busy || !status?.ready}>
+            <button className="btn-primary px-8 py-3 text-[1rem] leading-normal" onClick={() => send('Start my DJ')} disabled={busy || !status?.ready}>
               Start my DJ
             </button>
           </div>

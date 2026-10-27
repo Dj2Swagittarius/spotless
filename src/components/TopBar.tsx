@@ -95,7 +95,7 @@ export default function TopBar() {
           <div data-overlay className="absolute right-0 top-12 z-50 w-56 rounded-lg bg-card p-1 shadow-dialog">
             <div className="flex items-center gap-3 px-3 py-2.5">
               <span
-                className="flex h-9 w-9 items-center justify-center rounded-full text-base font-extrabold text-black"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[1rem] leading-normal font-extrabold text-black"
                 style={{ backgroundColor: me?.color ?? '#4d4d4d' }}
               >
                 {me ? me.name.charAt(0).toUpperCase() : '?'}
