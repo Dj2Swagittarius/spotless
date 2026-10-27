@@ -6,6 +6,7 @@ import { loadEq } from '@/lib/eq';
 import { loadQuality } from '@/lib/adaptive';
 import type { Track } from '@/lib/types';
 import { connect, findPort, type NativeBridge } from './nativeBridge';
+import { isRemote, takePendingStart, useDevices } from './devices';
 
 /**
  * In the Android app the native player is the engine. The player store stays the source of queue logic
@@ -63,8 +64,11 @@ export function startNativeSync(bridge: NativeBridge): () => void {
     }
   };
 
-  const pushQueue = (queue: Track[], index: number, play: boolean) =>
-    bridge.send({ type: 'setQueue', tracks: queue, index, positionMs: 0, play, baseVersion: version });
+  const pushQueue = (queue: Track[], index: number, play: boolean) => {
+    // a handoff from another device starts the song where that device was
+    const start = index >= 0 && queue[index] ? takePendingStart(queue[index].id) : 0;
+    bridge.send({ type: 'setQueue', tracks: queue, index, positionMs: Math.round(start * 1000), play, baseVersion: version });
+  };
 
   const sendSettings = () => {
     const s = usePlayer.getState();
@@ -77,6 +81,8 @@ export function startNativeSync(bridge: NativeBridge): () => void {
   };
 
   const off = bridge.on((e) => {
+    // while another device plays, the store mirrors that device; native's (paused) state stays out of it
+    if (isRemote() && (e.type === 'queue' || e.type === 'state')) return;
     switch (e.type) {
       case 'queue': {
         version = e.queueVersion;
@@ -132,7 +138,7 @@ export function startNativeSync(bridge: NativeBridge): () => void {
   });
 
   const unsubscribe = usePlayer.subscribe((s, prev) => {
-    if (applying || !ready) return;
+    if (applying || !ready || isRemote()) return;
     let replaced = false;
     if (s.queue !== prev.queue) {
       const was = prev.queue[prev.index];
@@ -153,6 +159,17 @@ export function startNativeSync(bridge: NativeBridge): () => void {
     if (s.duck !== prev.duck) bridge.send({ type: 'setDuck', value: s.duck });
   });
 
+  // becoming a remote silences native; becoming local again hands it the store's session (paused)
+  const offRemote = useDevices.subscribe((d, prev) => {
+    if (!ready || d.remote === prev.remote) return;
+    if (d.remote) bridge.send({ type: 'pause' });
+    else {
+      const s = usePlayer.getState();
+      pushQueue(s.queue, s.index, s.isPlaying);
+      sendSettings();
+    }
+  });
+
   const onEq = () => {
     const eq = loadEq();
     bridge.send({ type: 'setEq', enabled: eq.enabled, gains: eq.gains });
@@ -169,6 +186,7 @@ export function startNativeSync(bridge: NativeBridge): () => void {
   return () => {
     off();
     unsubscribe();
+    offRemote();
     if (typeof window !== 'undefined') {
       window.removeEventListener('eq-changed', onEq);
       window.removeEventListener('quality-changed', onQuality);

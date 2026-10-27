@@ -9,6 +9,17 @@ import { fmtDuration } from '@/lib/format';
 import { attachEq, resumeEq } from '@/lib/eq';
 import { connectNative, nativeBridge, useNative } from '@/lib/client/nativeSync';
 import {
+  connectDevices,
+  isRemote,
+  registerLocalPlayback,
+  remoteSeek,
+  reportSoon,
+  takePendingStart,
+  useDevices,
+  useRemoteProgress,
+} from '@/lib/client/devices';
+import DevicePicker, { PlayingOnBanner } from './DevicePicker';
+import {
   RUNGS,
   currentRung,
   deferPreload,
@@ -148,8 +159,12 @@ export default function Player() {
   // In the Android app the native player is the engine: position, duration and the sleep timer come from it,
   // and the <audio> elements below are not rendered (every engine handler already no-ops without them).
   const nativeState = useNative();
-  const progress = nativeState.active ? nativeState.positionMs / 1000 : webProgress;
-  const duration = nativeState.active ? nativeState.durationMs / 1000 : webDuration;
+  // While another device plays ("Play on"), this page is its remote: the bar follows that device's clock.
+  const remote = useDevices((s) => s.remote);
+  const remoteProgress = useRemoteProgress();
+  const progress = remote ? remoteProgress : nativeState.active ? nativeState.positionMs / 1000 : webProgress;
+  const remoteDuration = index >= 0 ? (queue[index]?.duration ?? 0) : 0;
+  const duration = remote ? remoteDuration : nativeState.active ? nativeState.durationMs / 1000 : webDuration;
   const [showQueue, setShowQueue] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
   const [expanded, setExpanded] = useState(false); // mobile: mini vs full player
@@ -186,7 +201,13 @@ export default function Player() {
   useEffect(() => {
     usePlayer.persist?.rehydrate()?.catch(() => {});
     // inside the Android app, hand playback to the native player once the session is restored
-    return connectNative();
+    const stopNative = connectNative();
+    // join the user's devices for "Play on"
+    const stopDevices = connectDevices();
+    return () => {
+      stopNative();
+      stopDevices();
+    };
   }, []);
 
   const clearResumeSeek = () => {
@@ -294,10 +315,20 @@ export default function Player() {
     postHistory(t, 'start');
   };
 
+  // a play() the browser refuses (autoplay policy: playback handed over from another device to a page
+  // nobody has clicked yet) must not leave the store, and every remote, showing "playing"
+  const onPlayRefused = (err: unknown) => {
+    if ((err as { name?: string } | null)?.name === 'NotAllowedError') setPlaying(false);
+  };
+
   // load current track into the active element (skip when a fade already put it there)
   useEffect(() => {
     const a = els()[active];
     if (!a || !track) return;
+    // another device is playing: this page only shows it, and loads nothing
+    if (remote) return;
+    // playback handed over from another device picks the song up where that device was
+    const startAt = track.streamUrl ? 0 : takePendingStart(track.id);
     clearResumeSeek();
     clearStartStall();
     resetPlayTracking();
@@ -315,10 +346,27 @@ export default function Player() {
       // fetch anything yet (a transcode rung would spin up ffmpeg on the server just to
       // answer a metadata request nobody asked for) — the first play() loads it
       a.preload = isPlaying ? 'auto' : 'none';
-      setSrc(a, track, currentRung());
+      setSrc(a, track, currentRung(), startAt);
+      if (startAt > 0 && rungOf(a).bitrate === 0) {
+        try {
+          a.currentTime = startAt; // before metadata this sets where playback will start
+        } catch {
+          // not seekable yet
+        }
+      }
       a.volume = levelFor(track.gain);
-      if (isPlaying) a.play().catch(() => {});
-      setProgress(0);
+      if (isPlaying) a.play().catch(onPlayRefused);
+      setProgress(startAt);
+    } else if (startAt > 0) {
+      // still loaded from when it last played here: move it to the handed-over spot
+      const rung = rungOf(a);
+      if (rung.bitrate > 0) {
+        lastSwitchRef.current = Date.now();
+        setSrc(a, track, rung, startAt);
+      } else {
+        a.currentTime = startAt;
+      }
+      setProgress(startAt);
     }
     if (isPlaying) markStarted(track);
     if ('mediaSession' in navigator) {
@@ -330,13 +378,13 @@ export default function Player() {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track?.id]);
+  }, [track?.id, remote]);
 
   // preload the upcoming track into the idle element for gapless/crossfade starts
   // (skip live stations — nothing to preload, and buffering a live stream wastes bandwidth)
   useEffect(() => {
     const other = els()[1 - active];
-    if (!other || fadingRef.current) return;
+    if (!other || fadingRef.current || remote) return;
     // a restored session sits paused at the saved track until the user presses play;
     // until then there is nothing to be gapless into, so don't download the next song
     // in full on every page load
@@ -348,11 +396,12 @@ export default function Player() {
       other.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nextTrack?.id, active, progress, duration, isPlaying]);
+  }, [nextTrack?.id, active, progress, duration, isPlaying, remote]);
 
   // radio: when the last queued track starts, top the queue up in advance
   useEffect(() => {
-    if (!radio || !track || track.streamUrl || index !== queue.length - 1 || radioFetchingRef.current) return;
+    // the device that plays tops up its own queue; a remote just sees the result
+    if (!radio || remote || !track || track.streamUrl || index !== queue.length - 1 || radioFetchingRef.current) return;
     radioFetchingRef.current = true;
     const exclude = queue.slice(-200).map((t) => t.id).join(',');
     fetch(`/api/radio?seed=${track.id}&exclude=${exclude}`)
@@ -365,7 +414,7 @@ export default function Player() {
         radioFetchingRef.current = false;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track?.id, radio]);
+  }, [track?.id, radio, remote]);
 
   // play/pause sync on the active element — and on the incoming one while a crossfade
   // is running, so pausing mid-fade silences both and resuming picks the fade back up
@@ -373,16 +422,16 @@ export default function Player() {
     const a = els()[active];
     if (!a || !track) return;
     const b = fadingRef.current ? els()[1 - active] : null;
-    if (isPlaying) {
+    if (isPlaying && !remote) {
       resumeEq();
-      a.play().catch(() => {});
+      a.play().catch(onPlayRefused);
       b?.play().catch(() => {});
     } else {
       a.pause();
       b?.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, active]);
+  }, [isPlaying, active, remote]);
 
   useEffect(() => {
     const a = els()[active];
@@ -718,6 +767,12 @@ export default function Player() {
   const sleepLabel = sleepUntil ? `${Math.max(1, Math.ceil((sleepUntil - Date.now()) / 60000))}m` : null;
 
   const seek = (v: number) => {
+    if (isRemote()) {
+      remoteSeek(v);
+      return;
+    }
+    // remotes following this page jump along
+    reportSoon();
     const bridge = nativeBridge();
     if (nativeState.active && bridge) {
       const positionMs = Math.round(v * 1000);
@@ -754,6 +809,14 @@ export default function Player() {
   useEffect(() => {
     latest.current = { seek, progress, duration, volume, canSeek: !!track && !isStation };
   });
+
+  // "Play on" reads and moves the local playhead through these (handoffs, a remote's seek)
+  useEffect(() => {
+    registerLocalPlayback(
+      () => latest.current.progress,
+      (v) => latest.current.seek(v)
+    );
+  }, []);
 
   // global keyboard shortcuts — one document listener, reading live state through `latest`
   useEffect(() => {
@@ -918,7 +981,7 @@ export default function Player() {
             <img src={`/api/artwork/${track.albumId}`} alt="" className="h-10 w-10 rounded-sm object-cover" />
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{track.title}</div>
-              <div className="truncate text-xs text-subdued">{track.artist}</div>
+              {remote ? <PlayingOnBanner /> : <div className="truncate text-xs text-subdued">{track.artist}</div>}
             </div>
             {!isStation && (
               <button
@@ -1091,7 +1154,9 @@ export default function Player() {
                 >
                   <MicIcon size={20} />
                 </button>
+                <DevicePicker size={20} />
               </div>
+              <PlayingOnBanner className="mt-3 justify-center" />
             </div>
           </div>
         )}
@@ -1119,6 +1184,7 @@ export default function Player() {
                       </Link>
                     </>
                   )}
+                  <PlayingOnBanner className="mt-0.5" />
                 </div>
                 {!isStation && (
                   <button
@@ -1233,6 +1299,7 @@ export default function Player() {
             >
               <QueueIcon size={18} />
             </button>
+            <DevicePicker />
             <VolumeIcon size={18} className="text-subdued" />
             <input
               type="range"

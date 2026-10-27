@@ -5,6 +5,13 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- Play on: pick which device plays the music. Every open Spotless (browser tab, desktop app, phone, TV) signed in
+  to the same profile shows up under the new devices button in the player bar. Choose one and playback moves there,
+  picking the song up where it was; the device you are on turns into a remote that shows "Playing on ..." and whose
+  play, skip, seek, volume, shuffle, repeat and queue controls drive the other device. Rename a device from the same
+  list. A browser tab that has never been clicked may refuse to start sound when playback is sent to it (browser
+  autoplay rules); it then shows as paused, and one click on it starts it.
+
 ## [0.4.1] - 2026-10-26
 
 - Android TV: the app now works with a TV remote. Arrow keys move between controls (a text field keeps Left/Right
