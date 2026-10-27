@@ -5,6 +5,8 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
 - Play on: pick which device plays the music. Every open Spotless (browser tab, desktop app, phone, TV) signed in
   to the same profile shows up under the new devices button in the player bar. Choose one and playback moves there,
   picking the song up where it was; the device you are on turns into a remote that shows "Playing on ..." and whose
