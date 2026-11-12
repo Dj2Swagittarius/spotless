@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanDevice, connectDevice, type DeviceEvent } from '@/lib/devices';
+import { requestOrigin } from '@/lib/auth';
+import { rememberOrigin, startCast } from '@/lib/cast/registry';
 import { userIdFrom } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -17,6 +19,8 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
   const device = cleanDevice({ id: q.get('id'), name: q.get('name'), kind: q.get('kind') });
   if (!device) return NextResponse.json({ error: 'invalid device' }, { status: 400 });
+  startCast();
+  rememberOrigin(uid, requestOrigin(req));
 
   const encoder = new TextEncoder();
   let disconnect: (() => void) | null = null;

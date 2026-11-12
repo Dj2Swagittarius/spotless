@@ -13,7 +13,9 @@ const PUBLIC_API = new Set([
 ]);
 // These routes choose their own Cache-Control (long-lived public artwork, no-store streams);
 // forcing no-store on them would make every album cover re-download on each page view.
-const SELF_CACHED = /^\/api\/(?:artwork|stream)\/|^\/api\/stations\/[^/]+\/stream$/;
+const SELF_CACHED = /^\/api\/(?:artwork|stream)\/|^\/api\/stations\/[^/]+\/stream$|^\/api\/cast\/[^/]+\/(?:stream|art)\//;
+// A Chromecast fetching music has no session; these routes check their own cast token instead.
+const CAST_MEDIA = /^\/api\/cast\/[A-Za-z0-9_-]{16,64}\/(?:stream|art)\/[^/]+$/;
 const CSRF_EXEMPT = new Set(['/api/lidarr/webhook']);
 const UNSAFE = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -41,6 +43,7 @@ export function proxy(req: NextRequest) {
   // Lidarr must be able to call its webhook without a browser session. Protect it with
   // LIDARR_WEBHOOK_SECRET as already supported by Spotless when reachable beyond a trusted LAN.
   if (CSRF_EXEMPT.has(path) || PUBLIC_API.has(path)) return NextResponse.next();
+  if ((req.method === 'GET' || req.method === 'HEAD') && CAST_MEDIA.test(path)) return NextResponse.next();
 
   const session = sessionFromRequest(req);
   if (session) {

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanPatch, renameDevice, reportState, sendCommand, transfer, type RemoteCommand } from '@/lib/devices';
+import { requestOrigin } from '@/lib/auth';
+import { rememberOrigin } from '@/lib/cast/registry';
 import { userIdFrom } from '@/lib/user';
 
 export const dynamic = 'force-dynamic';
@@ -21,6 +23,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
   }
   const from = typeof body.from === 'string' ? body.from : '';
+  // a Chromecast this user plays on fetches music from wherever their pages reach the server
+  rememberOrigin(uid, requestOrigin(req));
   let ok = false;
   switch (body.action) {
     case 'state':

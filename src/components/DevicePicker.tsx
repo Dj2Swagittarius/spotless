@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { playOn, renameThisDevice, useDevices } from '@/lib/client/devices';
 import { useEscape } from '@/lib/client/escapeStack';
 import type { DeviceKind } from '@/lib/devices';
-import { ComputerIcon, DevicesIcon, PhoneIcon, TvIcon } from './Icons';
+import { CastIcon, ComputerIcon, DevicesIcon, PhoneIcon, TvIcon } from './Icons';
 
-const KIND_ICON: Record<DeviceKind, typeof TvIcon> = { computer: ComputerIcon, phone: PhoneIcon, tv: TvIcon };
+const KIND_ICON: Record<DeviceKind, typeof TvIcon> = { computer: ComputerIcon, phone: PhoneIcon, tv: TvIcon, cast: CastIcon };
 
 /** "Play on": the button in the player bar and its list of this user's open devices. */
 export default function DevicePicker({ size = 18, className = '' }: { size?: number; className?: string }) {
@@ -81,8 +81,9 @@ export default function DevicePicker({ size = 18, className = '' }: { size?: num
                     <span className={`block truncate text-xs ${playing ? 'text-accent' : 'text-subdued'}`}>
                       {busy === d.id
                         ? 'Connecting...'
-                        : [d.id === me.id ? 'This device' : null, playing ? 'Playing' : null].filter(Boolean).join(' · ') ||
-                          'Available'}
+                        : [d.id === me.id ? 'This device' : null, d.kind === 'cast' ? 'Chromecast' : null, playing ? 'Playing' : null]
+                            .filter(Boolean)
+                            .join(' · ') || 'Available'}
                     </span>
                   </span>
                 </button>
@@ -90,7 +91,8 @@ export default function DevicePicker({ size = 18, className = '' }: { size?: num
             })}
             {list.length === 1 && (
               <p className="px-2 pt-1 text-xs text-subdued">
-                Open Spotless on your TV, phone or another computer, signed in to this profile, and it shows up here.
+                Open Spotless on your TV, phone or another computer, signed in to this profile, and it shows up here. Chromecasts on
+                your network show up by themselves, or can be added in Settings.
               </p>
             )}
             <div className="mt-2 border-t border-highlight px-2 pt-2">

@@ -11,7 +11,7 @@ import type { Track } from './types';
  * means the pages reconnect and the next one to press play becomes active again.
  */
 
-export type DeviceKind = 'computer' | 'phone' | 'tv';
+export type DeviceKind = 'computer' | 'phone' | 'tv' | 'cast';
 
 export interface DeviceInfo {
   id: string;
@@ -54,7 +54,17 @@ interface Conn {
   close: () => void;
 }
 
+/**
+ * A device that is not a page: a Chromecast the server itself drives (lib/cast). It is listed for
+ * every user, and gets the same events a page would, tagged with the user they are for.
+ */
+export interface ExternalDevice {
+  info: DeviceInfo;
+  deliver: (userId: number, e: DeviceEvent) => void;
+}
+
 interface UserHub {
+  userId: number;
   conns: Map<string, Conn>;
   activeId: string | null;
   activeName: string | null;
@@ -79,11 +89,26 @@ const RELEASE_HOLD_MS = 3000;
 // hub must be one map for all of them.
 const g = globalThis as typeof globalThis & { __spotlessDevicesV1?: Map<number, UserHub> };
 const hubs = (g.__spotlessDevicesV1 ??= new Map());
+const ge = globalThis as typeof globalThis & { __spotlessExternalDevicesV1?: { list: () => ExternalDevice[] } };
+const external = (ge.__spotlessExternalDevicesV1 ??= { list: () => [] });
+
+function externalDevice(id: string | null): ExternalDevice | undefined {
+  return id ? external.list().find((d) => d.info.id === id) : undefined;
+}
 
 function hubFor(userId: number): UserHub {
   let hub = hubs.get(userId);
   if (!hub) {
-    hub = { conns: new Map(), activeId: null, activeName: null, state: null, positionAt: 0, dropTimer: null, releasedAt: new Map() };
+    hub = {
+      userId,
+      conns: new Map(),
+      activeId: null,
+      activeName: null,
+      state: null,
+      positionAt: 0,
+      dropTimer: null,
+      releasedAt: new Map(),
+    };
     hubs.set(userId, hub);
   }
   return hub;
@@ -99,7 +124,7 @@ function currentState(hub: UserHub): PlaybackSnapshot | null {
 function devicesEvent(hub: UserHub): DeviceEvent {
   return {
     type: 'devices',
-    devices: [...hub.conns.values()].map((c) => c.device),
+    devices: [...[...hub.conns.values()].map((c) => c.device), ...external.list().map((d) => d.info)],
     activeId: hub.activeId,
     activeName: hub.activeName,
   };
@@ -109,17 +134,29 @@ function broadcast(hub: UserHub, e: DeviceEvent, except?: string) {
   for (const [id, c] of hub.conns) if (id !== except) c.send(e);
 }
 
+/** Send `e` to device `id` of this hub, page or external. False when there is no such device. */
+function deliver(hub: UserHub, id: string, e: DeviceEvent): boolean {
+  const conn = hub.conns.get(id);
+  if (conn) {
+    conn.send(e);
+    return true;
+  }
+  const ext = externalDevice(id);
+  ext?.deliver(hub.userId, e);
+  return !!ext;
+}
+
 function release(hub: UserHub, id: string | null) {
   if (!id) return;
   hub.releasedAt.set(id, Date.now());
-  hub.conns.get(id)?.send({ type: 'release' });
+  deliver(hub, id, { type: 'release' });
 }
 
 function setActive(hub: UserHub, id: string | null) {
   if (hub.dropTimer) clearTimeout(hub.dropTimer);
   hub.dropTimer = null;
   hub.activeId = id;
-  hub.activeName = id ? (hub.conns.get(id)?.device.name ?? hub.activeName) : null;
+  hub.activeName = id ? (hub.conns.get(id)?.device.name ?? externalDevice(id)?.info.name ?? hub.activeName) : null;
 }
 
 export function cleanDevice(raw: { id?: unknown; name?: unknown; kind?: unknown }): DeviceInfo | null {
@@ -166,7 +203,12 @@ function mergeState(hub: UserHub, patch: Partial<PlaybackSnapshot>) {
 }
 
 /** A device's event stream opened. Returns the function to call when it closes. */
-export function connectDevice(userId: number, device: DeviceInfo, send: Conn['send'], close: Conn['close']): () => void {
+export function connectDevice(
+  userId: number,
+  device: DeviceInfo,
+  send: Conn['send'],
+  close: Conn['close']
+): () => void {
   const hub = hubFor(userId);
   const old = hub.conns.get(device.id);
   if (old) {
@@ -228,26 +270,70 @@ export function reportState(userId: number, from: string, patch: Partial<Playbac
 export function sendCommand(userId: number, from: string, cmd: RemoteCommand): boolean {
   const hub = hubFor(userId);
   if (!hub.conns.has(from) || !hub.activeId || hub.activeId === from) return false;
-  const target = hub.conns.get(hub.activeId);
-  if (!target) return false;
-  target.send({ type: 'command', cmd });
-  return true;
+  return deliver(hub, hub.activeId, { type: 'command', cmd });
 }
 
 /** Move playback to device `to`. A transfer from the active device carries its latest state along. */
 export function transfer(userId: number, from: string, to: string, patch: Partial<PlaybackSnapshot> | null): boolean {
   const hub = hubFor(userId);
-  const target = hub.conns.get(to);
-  if (!target || !hub.conns.has(from)) return false;
+  if (!(hub.conns.has(to) || externalDevice(to)) || !hub.conns.has(from)) return false;
   if (hub.activeId === to) return true;
   if (patch && (hub.activeId === from || !hub.activeId)) mergeState(hub, patch);
   const prev = hub.activeId;
   setActive(hub, to);
   hub.releasedAt.delete(to);
   release(hub, prev);
-  target.send({ type: 'activate', state: currentState(hub), play: true });
+  deliver(hub, to, { type: 'activate', state: currentState(hub), play: true });
   broadcast(hub, devicesEvent(hub));
   return true;
+}
+
+// --- external devices (Chromecasts) ------------------------------------------------------------
+
+function stopActive(hub: UserHub) {
+  setActive(hub, null);
+  if (hub.state) {
+    mergeState(hub, { isPlaying: false });
+    broadcast(hub, { type: 'state', state: currentState(hub)! });
+  }
+  broadcast(hub, devicesEvent(hub));
+}
+
+/**
+ * Install the source of external devices and tell every page the list may have changed. An active
+ * device that dropped off the list stops being active.
+ */
+export function setExternalDevices(list: () => ExternalDevice[]) {
+  external.list = list;
+  externalDevicesChanged();
+}
+
+/** The external device list changed (one found, one gone, one renamed). */
+export function externalDevicesChanged() {
+  for (const hub of hubs.values()) {
+    if (hub.activeId && !hub.conns.has(hub.activeId) && !externalDevice(hub.activeId) && !hub.dropTimer)
+      stopActive(hub);
+    else {
+      if (hub.activeId && externalDevice(hub.activeId)) hub.activeName = externalDevice(hub.activeId)!.info.name;
+      broadcast(hub, devicesEvent(hub));
+    }
+  }
+}
+
+/** Playback state from an external device. Counts only while it is the user's active device. */
+export function externalState(userId: number, id: string, patch: Partial<PlaybackSnapshot>): boolean {
+  const hub = hubs.get(userId);
+  if (!hub || hub.activeId !== id) return false;
+  mergeState(hub, patch);
+  const { queue, ...rest } = currentState(hub)!;
+  broadcast(hub, { type: 'state', state: patch.queue ? { ...rest, queue } : rest });
+  return true;
+}
+
+/** An external device stopped playing for this user (session lost, or taken by someone else). */
+export function externalStopped(userId: number, id: string) {
+  const hub = hubs.get(userId);
+  if (hub && hub.activeId === id) stopActive(hub);
 }
 
 export function renameDevice(userId: number, id: string, name: string): boolean {
@@ -265,4 +351,5 @@ export function renameDevice(userId: number, id: string, name: string): boolean 
 export function resetDevices() {
   for (const hub of hubs.values()) if (hub.dropTimer) clearTimeout(hub.dropTimer);
   hubs.clear();
+  external.list = () => [];
 }

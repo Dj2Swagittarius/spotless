@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import FolderPicker from '@/components/FolderPicker';
 import DjSettings from '@/components/DjSettings';
+import CastSettings from '@/components/CastSettings';
 import ThemePicker from '@/components/ThemePicker';
 import { XIcon } from '@/components/Icons';
 import { usePlayer } from '@/store/player';
@@ -1003,6 +1004,12 @@ export default function SettingsPage() {
             <DjSettings />
           </Section>
         </div>
+      )}
+
+      {me?.isAdmin && (
+        <Section title="Chromecast">
+          <CastSettings />
+        </Section>
       )}
 
       {me?.isAdmin && (

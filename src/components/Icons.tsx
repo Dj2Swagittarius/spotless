@@ -169,5 +169,13 @@ export const ComputerIcon = (p: IconProps) =>
 export const PhoneIcon = (p: IconProps) =>
   svg(<path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM12 18h.01" />, p, '0 0 24 24', false);
 
+export const CastIcon = (p: IconProps) =>
+  svg(
+    <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6M2 20h.01" />,
+    p,
+    '0 0 24 24',
+    false
+  );
+
 export const TvIcon = (p: IconProps) =>
   svg(<path d="M3 6h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM8 2l4 4 4-4M7 22h10" />, p, '0 0 24 24', false);

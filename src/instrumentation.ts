@@ -82,5 +82,9 @@ export async function register() {
 
     const { scheduleSpotifySync } = await import('./lib/autosync');
     scheduleSpotifySync();
+
+    // Chromecasts on the LAN become "Play on" devices
+    const { startCast } = await import('./lib/cast/registry');
+    startCast();
   }
 }
