@@ -67,7 +67,7 @@ export default function Sidebar() {
     `flex w-full items-center gap-3 rounded-sm px-2 py-1.5 text-left hover:bg-highlight ${active ? 'bg-elevated' : ''}`;
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col gap-2 md:flex">
+    <aside data-tv-zone="sidebar" className="hidden w-64 shrink-0 flex-col gap-2 md:flex">
       {creating && (
         <PromptModal title="Create playlist" placeholder="Playlist name" submitLabel="Create" onSubmit={createPlaylist} onClose={() => setCreating(false)} />
       )}

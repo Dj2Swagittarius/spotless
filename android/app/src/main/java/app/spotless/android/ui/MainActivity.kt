@@ -187,7 +187,6 @@ class MainActivity : ComponentActivity() {
             onMicrophoneRequest = ::onMicrophoneRequest,
             onMicrophoneCanceled = { request -> if (pendingMic === request) pendingMic = null },
         )
-        view.setOnKeyListener { _, _, event -> onMediaKey(event) }
         bridge = WebBridge(this, view, origin).also { it.install() }
         webView = view
         view.loadUrl(origin)
@@ -208,6 +207,9 @@ class MainActivity : ComponentActivity() {
         webView = null
     }
 
+    // ahead of every view: the WebView handles keys itself and never ran a key listener set on it
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = onMediaKey(event) || super.dispatchKeyEvent(event)
+
     /**
      * A TV remote's media keys go straight to the player, before the WebView can swallow them. Down does the work
      * and the matching up is consumed with it.
@@ -217,7 +219,7 @@ class MainActivity : ComponentActivity() {
         if (c == null || event.keyCode !in MEDIA_KEYS) return false
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
-                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> if (c.isPlaying) c.pause() else c.play()
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> if (c.playWhenReady) c.pause() else c.play()
                 KeyEvent.KEYCODE_MEDIA_PLAY -> c.play()
                 KeyEvent.KEYCODE_MEDIA_PAUSE -> c.pause()
                 KeyEvent.KEYCODE_MEDIA_NEXT -> if (event.repeatCount == 0) c.seekToNext()

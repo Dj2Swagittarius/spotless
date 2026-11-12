@@ -68,12 +68,24 @@ function scope(active: Element | null): ParentNode {
   return all.length ? all[all.length - 1] : document;
 }
 
-/** Arrows that belong to the focused control itself: caret moves in text, value changes on a slider. */
+/**
+ * The slider the remote is adjusting. A slider only takes Left/Right after OK is pressed on it; otherwise the
+ * arrows move focus past it like any other control. Up/Down, OK again or leaving it lets go.
+ */
+let engaged: HTMLInputElement | null = null;
+
+function setEngaged(el: HTMLInputElement | null) {
+  engaged?.classList.remove('tv-engaged');
+  engaged = el;
+  el?.classList.add('tv-engaged');
+}
+
+/** Arrows that belong to the focused control itself: caret moves in text, value changes on an engaged slider. */
 function keyIsLocal(el: Element | null, dir: Dir): boolean {
   if (el instanceof HTMLSelectElement) return true;
   if (el instanceof HTMLTextAreaElement) return true;
   if (!(el instanceof HTMLInputElement)) return false;
-  if (el.type === 'range') return dir === 'left' || dir === 'right';
+  if (el.type === 'range') return el === engaged && (dir === 'left' || dir === 'right');
   if (dir === 'up' || dir === 'down') return false;
   // leave a text field once the caret is at that end
   const start = el.selectionStart;
@@ -81,11 +93,88 @@ function keyIsLocal(el: Element | null, dir: Dir): boolean {
   return dir === 'left' ? start > 0 || el.selectionEnd !== start : start < el.value.length;
 }
 
+/** One remote press moves a slider 5% of its range (the slider's own step is far too fine from a sofa). */
+export function stepValue(value: number, min: number, max: number, step: number, dir: 'left' | 'right'): number {
+  const inc = Math.max(step || 0, (max - min) / 20);
+  const next = dir === 'right' ? value + inc : value - inc;
+  return Math.min(max, Math.max(min, next));
+}
+
+function stepRange(el: HTMLInputElement, dir: 'left' | 'right') {
+  const value = stepValue(Number(el.value), Number(el.min || 0), Number(el.max || 100), Number(el.step), dir);
+  // through the native setter, so React's onChange sees the input event
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(el, String(value));
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/** The page area a control belongs to: sidebar, main or player. Arrows stay in the area until it runs out. */
+function zoneOf(el: Element): Element | null {
+  return el.closest('[data-tv-zone]');
+}
+
+/** The control last focused in each area, so coming back to an area lands where you left it. */
+const lastInZone = new WeakMap<Element, HTMLElement>();
+
+/**
+ * The page area past [zone]'s edge in [dir] (past [from]'s when it is in none), probed in line with [from]: the
+ * player below the page, the sidebar to its left, the page or sidebar above the player depending on the column.
+ */
+function zoneBeside(from: DOMRect, zone: Element | null, dir: Dir): Element | null | 'edge' {
+  const edge = zone ? zone.getBoundingClientRect() : from;
+  const gap = 16; // clears the padding between areas
+  const x = dir === 'left' ? edge.left - gap : dir === 'right' ? edge.right + gap : (from.left + from.right) / 2;
+  const y = dir === 'up' ? edge.top - gap : dir === 'down' ? edge.bottom + gap : (from.top + from.bottom) / 2;
+  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return 'edge';
+  const hit = document.elementFromPoint(x, y);
+  return hit ? zoneOf(hit) : null;
+}
+
+/**
+ * Where an arrow press goes: the nearest control that way in the same area. When the area runs out, into the area
+ * next to it that way (sidebar beside the page, player below it), at the control last used there or the area's
+ * default (Play), else the nearest one. At the screen's edge (Left on the player's first button) it stays put.
+ */
+function nextTarget(active: HTMLElement, items: HTMLElement[], dir: Dir): HTMLElement | undefined {
+  const from = active.getBoundingClientRect();
+  const zone = zoneOf(active);
+  const nearest = (els: HTMLElement[]) => els[pickNext(from, els.map((el) => el.getBoundingClientRect()), dir)];
+  const own = nearest(items.filter((el) => zoneOf(el) === zone));
+  if (own) return own;
+
+  const beside = zoneBeside(from, zone, dir);
+  if (beside === 'edge') return undefined;
+  if (beside && beside !== zone) {
+    const inside = items.filter((el) => zoneOf(el) === beside);
+    const last = lastInZone.get(beside);
+    if (last && inside.includes(last)) return last;
+    const pick = inside.find((el) => el.hasAttribute('data-tv-default')) ?? nearest(inside) ?? inside[0];
+    if (pick) return pick;
+  }
+  return nearest(items.filter((el) => zoneOf(el) !== zone));
+}
+
 function onKey(e: KeyboardEvent) {
-  const dir = KEYS[e.key];
-  if (!dir || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
   const active = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
-  if (keyIsLocal(active, dir)) return;
+
+  // OK on a slider picks it up for adjusting, OK again puts it down
+  if (e.key === 'Enter' && active instanceof HTMLInputElement && active.type === 'range') {
+    e.preventDefault();
+    setEngaged(engaged === active ? null : active);
+    return;
+  }
+
+  const dir = KEYS[e.key];
+  if (!dir) return;
+  if (keyIsLocal(active, dir)) {
+    if (engaged && active === engaged && (dir === 'left' || dir === 'right')) {
+      // capture phase: this also keeps the player's own arrow-key seek from adding to it
+      e.preventDefault();
+      stepRange(engaged, dir);
+    }
+    return;
+  }
+  if (engaged) setEngaged(null);
 
   const root = scope(active);
   const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el !== active && visible(el));
@@ -99,8 +188,7 @@ function onKey(e: KeyboardEvent) {
       return r.bottom > 0 && r.top < innerHeight;
     }) ?? items[0];
   } else {
-    const i = pickNext(active.getBoundingClientRect(), items.map((el) => el.getBoundingClientRect()), dir);
-    if (i >= 0) target = items[i];
+    target = nextTarget(active, items, dir);
   }
   // no control that way: up/down still scroll the page, left/right do nothing (they would seek otherwise)
   if (!target) {
@@ -108,8 +196,21 @@ function onKey(e: KeyboardEvent) {
     return;
   }
   e.preventDefault();
+  remember(target); // focus events alone can be missed while the window is not focused
   target.focus({ preventScroll: true });
   target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+function remember(el: HTMLElement) {
+  const zone = zoneOf(el);
+  if (zone) lastInZone.set(zone, el);
+}
+
+function onFocusIn(e: FocusEvent) {
+  const el = e.target;
+  if (!(el instanceof HTMLElement)) return;
+  if (engaged && el !== engaged) setEngaged(null);
+  remember(el);
 }
 
 let installed = false;
@@ -121,4 +222,5 @@ export function installTvNav() {
   document.documentElement.classList.add('tv');
   // capture: runs before the player's arrow-key seek shortcut, which skips prevented keys
   window.addEventListener('keydown', onKey, true);
+  window.addEventListener('focusin', onFocusIn, true);
 }

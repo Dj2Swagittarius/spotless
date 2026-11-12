@@ -835,6 +835,14 @@ export default function Player() {
           store.toggle();
           break;
         }
+        case 'MediaPlayPause': {
+          // a remote's play/pause button, when the app's own player isn't taking it
+          e.preventDefault();
+          if (e.repeat) return;
+          resumeEq();
+          store.toggle();
+          break;
+        }
         case 'ArrowRight':
         case 'ArrowLeft': {
           const forward = e.key === 'ArrowRight';
@@ -968,7 +976,7 @@ export default function Player() {
         </>
       )}
 
-      <div className={`app-player relative z-40 border-t border-highlight bg-black px-3 py-2 md:border-0 md:px-4 md:py-3 ${track ? '' : 'hidden md:block'}`}>
+      <div data-tv-zone="player" className={`app-player relative z-40 border-t border-highlight bg-black px-3 py-2 md:border-0 md:px-4 md:py-3 ${track ? '' : 'hidden md:block'}`}>
         {/* mobile: collapsed mini-player — tap to expand */}
         {track && !expanded && (
           <div
@@ -1218,6 +1226,7 @@ export default function Player() {
               </button>
               <button
                 onClick={onToggle}
+                data-tv-default
                 className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-black transition-transform hover:scale-105 active:scale-95"
                 title={isPlaying ? 'Pause' : 'Play'}
                 aria-label={isPlaying ? 'Pause' : 'Play'}

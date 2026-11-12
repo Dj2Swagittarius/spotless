@@ -5,6 +5,12 @@ All notable changes to Spotless are listed here. The format follows
 
 ## [Unreleased]
 
+- Android TV: the remote can now always get back to the sidebar and down to the player. Arrows stay within the
+  sidebar, the page or the player until it runs out, then step into the area next to it, landing where you last
+  were there (or on Play). The seek and volume sliders no longer grab Left/Right as you pass them: press OK on one
+  to adjust it with Left/Right, and OK, Up or Down to let go.
+- Android TV: the remote's play/pause button works. Media keys were handed to the page first, which ignored them.
+
 ## [0.5.0] - 2026-10-27
 
 - Play on: pick which device plays the music. Every open Spotless (browser tab, desktop app, phone, TV) signed in

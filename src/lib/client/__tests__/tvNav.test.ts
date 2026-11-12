@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTv, pickNext, type Box } from '../tvNav';
+import { isTv, pickNext, stepValue, type Box } from '../tvNav';
 
 const box = (left: number, top: number, w = 10, h = 10): Box => ({ left, top, right: left + w, bottom: top + h });
 
@@ -42,5 +42,17 @@ describe('pickNext', () => {
     const besideLow = box(30, 35);
     const fartherHigh = box(80, 0);
     expect(pickNext(tall, [fartherHigh, besideLow], 'right')).toBe(1);
+  });
+});
+
+describe('stepValue', () => {
+  it('moves a slider 5% of its range per press, within its bounds', () => {
+    // seek bar on a 4-minute track: 12 s per press, not the 0.5 s step
+    expect(stepValue(60, 0, 240, 0.5, 'right')).toBe(72);
+    expect(stepValue(60, 0, 240, 0.5, 'left')).toBe(48);
+    expect(stepValue(235, 0, 240, 0.5, 'right')).toBe(240);
+    expect(stepValue(3, 0, 240, 0.5, 'left')).toBe(0);
+    // volume 0..1
+    expect(stepValue(0.5, 0, 1, 0.01, 'right')).toBeCloseTo(0.55);
   });
 });

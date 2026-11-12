@@ -123,6 +123,10 @@
   outline: 3px solid var(--color-white);
   outline-offset: 3px;
 }
+/* a slider picked up with OK: Left/Right now change its value */
+.tv .tv-engaged:focus-visible {
+  outline-color: var(--color-accent);
+}
 
 /* faster taps + no accidental double-tap zoom on controls */
 button,
