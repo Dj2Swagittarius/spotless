@@ -73,7 +73,9 @@ export async function register() {
     // resets the next-run timer when it completes.
     startLibraryScanScheduler();
 
-    scanLibrary().catch((err) => log.error('startup scan failed:', err));
+    // automatic: at boot the music mount (NAS/ZFS/SMB) may not be attached yet and
+    // look like an empty folder; never let that wipe the library.
+    scanLibrary({ automatic: true }).catch((err) => log.error('startup scan failed:', err));
 
     const { scheduleBackups } = await import('./lib/backup');
     scheduleBackups();

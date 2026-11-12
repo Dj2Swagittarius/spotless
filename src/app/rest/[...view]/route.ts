@@ -800,7 +800,8 @@ const HANDLERS: Record<string, (ctx: CtxWithView) => Response | Promise<Response
 
   startScan: (ctx) => {
     if (ctx.user.id !== ADMIN_USER_ID) return fail(ctx, 50, 'admin only');
-    scanLibrary().catch(() => {});
+    // Subsonic clients may fire this on their own, so treat it as unattended.
+    scanLibrary({ automatic: true }).catch(() => {});
     const count = (db().prepare('SELECT COUNT(*) AS n FROM tracks').get() as { n: number }).n;
     return ok(ctx, { scanStatus: { scanning: true, count } });
   },

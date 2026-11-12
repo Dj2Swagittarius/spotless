@@ -22,7 +22,7 @@ function scheduleScan() {
   scanTimer = setTimeout(() => {
     scanTimer = null;
     firstQueuedAt = null;
-    scanLibrary().catch((err) => console.error('webhook scan failed:', err));
+    scanLibrary({ automatic: true }).catch((err) => console.error('webhook scan failed:', err));
   }, delay);
 }
 
